@@ -1,0 +1,38 @@
+{%- from "partials/icons.njk" import icon -%}
+{% set rel = collections.contentPages | relatedPages(page.url) %}
+{% if rel.children.length or rel.siblings.length %}
+<aside class="related" aria-label="Related pages">
+  {% if rel.children.length %}
+  <section class="related__group">
+    <h2 class="related__heading">Explore deeper</h2>
+    <ul class="related__list">
+      {% for item in rel.children %}
+      <li>
+        <a class="related__link" href="{{ site.url }}{{ item.url }}">
+          <span class="related__title">{{ item.data.title }}</span>
+          <span class="related__desc">{{ item.data.description | truncate(120) }}</span>
+          {{ icon('arrow-right', 'icon related__arrow') }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% if rel.siblings.length %}
+  <section class="related__group">
+    <h2 class="related__heading">Related in this section</h2>
+    <ul class="related__list">
+      {% for item in rel.siblings %}
+      <li>
+        <a class="related__link" href="{{ site.url }}{{ item.url }}">
+          <span class="related__title">{{ item.data.title }}</span>
+          <span class="related__desc">{{ item.data.description | truncate(120) }}</span>
+          {{ icon('arrow-right', 'icon related__arrow') }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</aside>
+{% endif %}

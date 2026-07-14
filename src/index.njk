@@ -1,0 +1,99 @@
+---
+layout: layouts/base.njk
+eleventyExcludeFromCollections: true
+title: ""
+description: "Engineer production OSM data pipelines: PBF/XML parsing, tag normalization, topology cleaning, routing graph extraction, and Python automation at continental scale."
+---
+{%- from "partials/icons.njk" import icon -%}
+<section class="hero">
+  <div class="container container--wide hero__inner">
+    <div class="hero__logo-line">
+      {% set logoClass = "logo--xl" %}
+      {% include "partials/logo.njk" %}
+    </div>
+    <h1 class="hero__title">
+      <span class="hero__title-main">OpenStreetMap Data Processing</span>
+      <span class="hero__title-sub">&amp; QA Pipelines</span>
+    </h1>
+    <div class="hero__intro">
+      <p>
+        A technical reference for engineers building and operating production OpenStreetMap data pipelines.
+        Cover the full ETL surface — from <strong>PBF and XML parsing</strong>, through
+        <strong>tag normalization</strong> and <strong>topology cleaning</strong>, all the way to
+        <strong>routing graph extraction</strong>, <strong>diff-based updates</strong>, and automated
+        <strong>validation rules</strong>.
+      </p>
+      <p>
+        Every page is written for mapping engineers, OSM contributors, GIS analysts, and Python ETL
+        developers who need deterministic, reproducible workflows at continental scale. Expect deep
+        binary-format dives, memory-aware streaming patterns, and rule-driven QA you can wire into Dask,
+        Ray, or plain old multiprocessing.
+      </p>
+      <p>
+        The content spans four tracks: a <a href="{{ site.url }}{{ site.sections[0].url }}">data fundamentals track</a>
+        covering the OSM schema and serialization formats, a <a href="{{ site.url }}{{ site.sections[1].url }}">parsing and
+        normalization track</a> covering ingestion and routing-graph conversion, a
+        <a href="{{ site.url }}{{ site.sections[2].url }}">replication and diff-sync track</a> for keeping local data current
+        with upstream change files, and a <a href="{{ site.url }}{{ site.sections[3].url }}">data quality and validation
+        track</a> for rule-driven QA.
+      </p>
+    </div>
+    <div class="hero__ctas">
+      {% for cta in site.ctas %}
+      <a class="cta cta--{{ cta.color }}" href="{{ site.url }}{{ cta.url }}">
+        <span class="cta__icon">{{ icon(cta.icon) }}</span>
+        <span class="cta__label">{{ cta.label }}</span>
+        <span class="cta__arrow">{{ icon('arrow-right') }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section-overview">
+  <div class="container container--wide">
+    <h2 class="section-overview__heading">Browse the content tracks</h2>
+    <div class="section-overview__grid">
+      {% for s in site.sections %}
+      <article class="track-card">
+        <div class="track-card__icon">{{ icon(s.icon) }}</div>
+        <h3 class="track-card__title"><a href="{{ site.url }}{{ s.url }}">{{ s.title }}</a></h3>
+        <p class="track-card__blurb">{{ s.blurb }}</p>
+        <ul class="track-card__list">
+          {% set rel = collections.contentPages | relatedPages(s.url) %}
+          {% for child in rel.children %}
+          <li><a href="{{ site.url }}{{ child.url }}">{{ child.data.title }}</a></li>
+          {% endfor %}
+        </ul>
+        <a class="track-card__more" href="{{ site.url }}{{ s.url }}">
+          Read the section overview {{ icon('arrow-right') }}
+        </a>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="about">
+  <div class="container container--wide about__inner">
+    <h2 class="about__heading">What you will find here</h2>
+    <div class="about__grid">
+      <div>
+        <h3>Format internals</h3>
+        <p>Byte-level dissection of the PBF container, block framing, StringTable deduplication, and delta encoding for nodes, ways, and relations.</p>
+      </div>
+      <div>
+        <h3>Parsing &amp; normalization</h3>
+        <p>Async ingestion with Pyrosm, chunked memory-aware processing, regex-driven value standardization, and reproducible schema alignment.</p>
+      </div>
+      <div>
+        <h3>Topology &amp; routing</h3>
+        <p>OSMnx graph conversion, turn restrictions, edge contraction, one-way handling, and accessibility constraints for routing engines.</p>
+      </div>
+      <div>
+        <h3>Quality assurance</h3>
+        <p>Error isolation, structured logging, quarantine workflows, automated tag taxonomy validation, and ODbL compliance checks.</p>
+      </div>
+    </div>
+  </div>
+</section>

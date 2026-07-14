@@ -1,0 +1,224 @@
+---
+pageDescription: "How OpenStreetMap stores coordinates in implicit WGS 84 (EPSG:4326), and how to reproject OSM node arrays to projected CRS with pyproj at extract scale."
+---
+# Coordinate Reference Systems in OSM
+
+OpenStreetMap standardizes on the WGS 84 geographic coordinate system (EPSG:4326) for every raw spatial primitive it stores. That single architectural decision simplifies global ingestion and keeps community editing tools interoperable, but it pushes a hard problem downstream: raw OSM extracts carry **no explicit projection metadata**, and angular degrees are the wrong unit for almost every metric operation an analytics pipeline needs to perform. The failure scenario is concrete and common. A team buffers building footprints by `25` "units" while the data is still in EPSG:4326, treating degrees as if they were metres; the buffer silently varies from roughly 1.8 km at the equator to under 1 km at 60° latitude, every downstream spatial join is corrupted, and nothing raises an error because degrees and metres are both just `float64`. This page covers how OSM encodes coordinates, why the CRS is implicit, and how to reproject node arrays correctly and reproducibly at extract scale.
+
+Coordinate handling is one stage of a larger ingestion pipeline. It sits downstream of parsing and upstream of spatial indexing, so it inherits assumptions from the [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) foundation and feeds the [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/) stage that follows.
+
+## Data-flow for the reprojection stage
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 200" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto" role="img" aria-label="Reprojection data-flow: an OSM extract in EPSG:4326 is buffered, passed through a pyproj transformer with always_xy true, projected to UTM, LAEA or Web Mercator, then sent to a spatial index or analytic store.">
+  <title>Reprojection stage data-flow</title>
+  <desc>Five-stage horizontal pipeline. An OSM extract in EPSG:4326 (lat, lon) becomes an (N, 2) float64 buffer, flows through a pyproj Transformer with always_xy=True, emerges as projected (x, y) in UTM, LAEA or Web Mercator, and is handed to a spatial index or analytic store. Two invariants hold across the stage: the source is always EPSG:4326 and axis order is normalized to (longitude, latitude).</desc>
+  <defs>
+    <marker id="crs-arr" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="500" y="22" text-anchor="middle" font-size="14" font-family="inherit" fill="currentColor" font-weight="700">EPSG:4326 in → projected (x, y) out</text>
+  <!-- Box 1: source -->
+  <rect x="16" y="48" width="168" height="88" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="100" y="78" text-anchor="middle" font-size="13" font-family="inherit" fill="currentColor" font-weight="600">OSM extract</text>
+  <text x="100" y="98" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">EPSG:4326</text>
+  <text x="100" y="116" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">(lat, lon)</text>
+  <!-- Box 2: buffer -->
+  <rect x="216" y="48" width="168" height="88" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="300" y="88" text-anchor="middle" font-size="13" font-family="inherit" fill="currentColor" font-weight="600">Buffer</text>
+  <text x="300" y="108" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">(N, 2) float64</text>
+  <!-- Box 3: transformer (critical) -->
+  <rect x="416" y="48" width="168" height="88" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="500" y="88" text-anchor="middle" font-size="13" font-family="inherit" fill="currentColor" font-weight="600">pyproj Transformer</text>
+  <text x="500" y="108" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">always_xy=True</text>
+  <!-- Box 4: projected -->
+  <rect x="616" y="48" width="168" height="88" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="700" y="78" text-anchor="middle" font-size="13" font-family="inherit" fill="currentColor" font-weight="600">Projected (x, y)</text>
+  <text x="700" y="98" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">UTM · LAEA</text>
+  <text x="700" y="116" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">Web Mercator</text>
+  <!-- Box 5: store -->
+  <rect x="816" y="48" width="168" height="88" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="900" y="88" text-anchor="middle" font-size="13" font-family="inherit" fill="currentColor" font-weight="600">Spatial index /</text>
+  <text x="900" y="108" text-anchor="middle" font-size="12" font-family="inherit" fill="currentColor">analytic store</text>
+  <!-- Arrows -->
+  <line x1="184" y1="92" x2="214" y2="92" stroke="currentColor" stroke-width="1.5" marker-end="url(#crs-arr)"/>
+  <line x1="384" y1="92" x2="414" y2="92" stroke="currentColor" stroke-width="1.5" marker-end="url(#crs-arr)"/>
+  <line x1="584" y1="92" x2="614" y2="92" stroke="currentColor" stroke-width="1.5" marker-end="url(#crs-arr)"/>
+  <line x1="784" y1="92" x2="814" y2="92" stroke="currentColor" stroke-width="1.5" marker-end="url(#crs-arr)"/>
+  <!-- Invariants caption -->
+  <text x="500" y="172" text-anchor="middle" font-size="11.5" font-family="inherit" fill="currentColor" opacity="0.85">Invariants: source is always EPSG:4326 · axis order normalized to (longitude, latitude) before transform</text>
+</svg>
+
+The stage takes decoded latitude/longitude arrays, validates that they fall inside WGS 84 bounds, selects a target projection appropriate to the analysis, and emits projected `(x, y)` arrays ready for metric work. Everything hinges on two invariants: the source is always EPSG:4326, and axis order must be normalized to `(longitude, latitude)` before transformation.
+
+## Prerequisite concepts
+
+Read these foundations first, because the reprojection stage assumes their output:
+
+- The [PBF File Structure Deep Dive](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/) explains how coordinates are delta-encoded and scaled to integers — the raw values you reproject come out of this layer.
+- The [Node-Way-Relation Data Model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/) defines which primitives actually carry coordinates (nodes) versus which inherit them by reference (ways and relations).
+- The [OSM XML vs PBF Comparison](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/) shows how each serialization represents the same WGS 84 values, which determines the precision you start from before any projection step.
+
+## Specification: how OSM encodes coordinates
+
+Coordinates in OpenStreetMap are decimal degrees, but the on-disk representation differs by format and neither format embeds a CRS identifier.
+
+In PBF, the `PrimitiveBlock` defines a `granularity` field (default `100`, expressed in nanodegrees) and `lat_offset` / `lon_offset` fields (default `0`). A node's stored integer is delta-encoded against the previous node in its dense group; the real coordinate is reconstructed as:
+
+$$ \text{lat} = 10^{-9} \cdot (\text{lat\_offset} + \text{granularity} \cdot \text{lat}_{\text{int}}) $$
+
+With the default granularity of 100 nanodegrees, the coordinate quantum is `1e-7` degrees — roughly 1.1 cm of latitude at the equator, far finer than any survey-grade source OSM ingests. Integer storage keeps parsing in fast integer arithmetic and lets delta-encoding compress monotonic ID-ordered nodes. The WGS 84 datum is assumed by strict convention; storing a spatial reference string against hundreds of millions of primitives would be pure overhead.
+
+In OSM XML, the same value appears as a human-readable `lat="..."` / `lon="..."` attribute with up to seven decimal places. The convenience costs parsing throughput and memory, and again no projection is declared anywhere in the document.
+
+The practical consequence: an ETL pipeline must **assign** EPSG:4326 explicitly at the ingestion boundary. This matters most when OSM data is merged with municipal datasets that default to a local state plane or UTM zone — without an explicit source CRS, a reprojection library has nothing to transform *from* and will either error or, worse, pass the coordinates through unchanged.
+
+## Step-by-step: reproject an OSM node array
+
+The following procedure turns validated WGS 84 arrays into a projected CRS suitable for metric operations.
+
+1. **Validate bounds at the ingestion boundary.** Before any transformation, confirm every coordinate pair falls inside the valid WGS 84 envelope and flag outliers, which almost always indicate parsing corruption or a botched delta-decode:
+
+$$ -90 \le \phi \le 90,\quad -180 \le \lambda \le 180 $$
+
+where $\phi$ is latitude and $\lambda$ is longitude.
+
+2. **Select the target projection.** For local metric accuracy, pick the UTM zone covering the extract's centroid; for continental equal-area statistics, use a Lambert Azimuthal Equal-Area (LAEA) CRS such as EPSG:3035 (Europe); for slippy-map tiles, use Web Mercator (EPSG:3857). The UTM zone for a given longitude follows:
+
+$$ \text{zone} = \left\lfloor \frac{\lambda + 180}{6} \right\rfloor + 1 $$
+
+3. **Initialize a reusable transformer.** Build one `Transformer` per process and enforce `(longitude, latitude)` ordering so axis conventions can never silently swap.
+
+4. **Transform in memory-bounded chunks.** Stream node arrays through the transformer in fixed-size chunks to keep the memory footprint deterministic regardless of extract size.
+
+```python
+import numpy as np
+import logging
+from pyproj import Transformer, CRS
+from pyproj.exceptions import ProjError
+
+logger = logging.getLogger("osm_crs_etl")
+
+def initialize_transformer(target_epsg: int) -> Transformer:
+    """
+    Initialize a thread-safe, reusable pyproj Transformer.
+    Enforces (longitude, latitude) ordering to prevent axis-swap errors.
+    """
+    try:
+        target_crs = CRS.from_epsg(target_epsg)
+        transformer = Transformer.from_crs(
+            "EPSG:4326", target_crs, always_xy=True
+        )
+        logger.info("Initialized transformer: EPSG:4326 -> EPSG:%d", target_epsg)
+        return transformer
+    except ProjError as e:
+        raise RuntimeError("CRS initialization failed. Verify PROJ data availability.") from e
+
+def transform_node_batch(
+    transformer: Transformer,
+    latitudes: np.ndarray,
+    longitudes: np.ndarray,
+    chunk_size: int = 500_000
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Vectorized coordinate transformation for OSM node arrays.
+    Processes in memory-efficient chunks to prevent OOM failures on large extracts.
+    Expects both arrays to have the same shape.
+    """
+    if latitudes.shape != longitudes.shape:
+        raise ValueError("Latitude and longitude arrays must have identical shapes.")
+
+    x_out = np.empty_like(latitudes, dtype=np.float64)
+    y_out = np.empty_like(longitudes, dtype=np.float64)
+
+    total_points = len(latitudes)
+    for start in range(0, total_points, chunk_size):
+        end = min(start + chunk_size, total_points)
+        try:
+            # pyproj with always_xy=True: first arg is longitude (x), second is latitude (y).
+            cx, cy = transformer.transform(
+                longitudes[start:end], latitudes[start:end]
+            )
+            x_out[start:end] = cx
+            y_out[start:end] = cy
+        except ProjError as e:
+            logger.warning(
+                "Transformation failed for chunk %d:%d — filling NaN. Error: %s",
+                start, end, e
+            )
+            x_out[start:end] = np.nan
+            y_out[start:end] = np.nan
+
+    return x_out, y_out
+```
+
+The `always_xy=True` parameter is non-negotiable in modern PROJ versions. It enforces `(longitude, latitude)` input ordering regardless of how the EPSG registry defines the axis sequence for the source CRS, eliminating the silent axis-swap bugs that historically corrupted spatial joins. For an end-to-end implementation with grid management, worker caching, and cadastral-grade accuracy checks, see [Converting OSM coordinates to local CRS with PyProj](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/converting-osm-coordinates-to-local-crs-with-pyproj/).
+
+## Validation and error-handling matrix
+
+Coordinate transformation fails in a small number of recurring ways. Detect each at the boundary and remediate without halting the run.
+
+| Error condition | Root cause | Detection method | Remediation |
+| --- | --- | --- | --- |
+| Coordinates appear swapped (lat in x slot) | `always_xy` omitted; relied on EPSG axis order | Round-trip deviates by whole degrees; points land in the ocean | Set `always_xy=True` on every `Transformer.from_crs` call |
+| `ProjError` on a chunk | Point outside target projection's valid band (e.g. UTM ±6° envelope) | Exception raised mid-transform | Catch per-chunk, fill `NaN`, log array indices, route to quarantine |
+| Latitude `> 90` / longitude `> 180` | Corrupt delta-decode or malformed offset/granularity | Bounds assertion at ingestion | Reject node, re-derive from `granularity` + `lat_offset` |
+| Silent datum drift | Legacy NAD27/ED50 shift applied to a WGS 84 target | Compare WKT operation path against expected authority chain | Pin EPSG codes; assert `to_wkt()` matches reviewed transform |
+| `PROJ_DATA not found` / missing grid | `PROJ_LIB`/`PROJ_DATA` unset or grid file absent | `ProjError` at transformer init | Provision grids; set `PROJ_NETWORK=OFF` in air-gapped runs |
+| Distorted areas/distances near high latitudes | Web Mercator used for metric analysis | Computed areas inflate poleward | Switch to UTM or an equal-area CRS (LAEA) for metrics |
+
+## Performance and scale considerations
+
+Large OSM extracts routinely exceed available RAM when loaded as monolithic DataFrames. Chunked transformation, as shown above, holds the memory footprint flat regardless of extract size — a planet-scale node stream and a city extract use the same per-chunk allocation. Two practices keep throughput high:
+
+- **Reuse one transformer.** `Transformer.from_crs` performs a database lookup and may load grid shift files; instantiating it per chunk destroys throughput. Build it once and share it across worker threads (the object is thread-safe for `transform`).
+- **Stream, don't materialize.** When feeding a spatial database or a tile generator, write transformed coordinates straight to disk or DB buffers through generators instead of holding intermediate arrays. This is the same memory discipline applied in [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/).
+
+`pyproj` vectorizes over NumPy arrays internally, so a 500,000-point chunk transforms in a single call rather than a Python loop — keep chunks large enough to amortize call overhead but small enough to bound peak memory.
+
+## Failure modes and gotchas
+
+- **Axis order is the silent killer.** Every other gotcha announces itself with an exception; an axis swap produces plausible-looking numbers that quietly place features on the wrong continent. Treat `always_xy=True` as a hard invariant and assert it in tests.
+- **UTM zone boundaries.** A regional extract straddling two UTM zones (e.g. data spanning longitude 12°E) cannot share a single zone without distortion at the edges. Either clip per zone or choose an equal-area CRS that covers the whole region.
+- **Granularity is not always the default.** Some producers set non-default `granularity` or non-zero `lat_offset`/`lon_offset` in the PBF block. Hard-coding `1e-7` instead of reading the block fields yields a constant positional shift.
+- **Web Mercator for analytics.** EPSG:3857 is a visualization projection; using it for area or distance computation inflates measurements toward the poles. Keep it for tiles only.
+
+## Integration with the next pipeline stage
+
+The output of this stage — validated, projected `(x, y)` arrays plus a recorded source/target EPSG pair — feeds directly into spatial indexing. A common pattern is to *index in native WGS 84 and defer projection to the query or export boundary*, which keeps the index portable across analyses; reproject only the working set a query returns. The wiring is small:
+
+```python
+# Index stays in EPSG:4326; reproject only on export for metric work.
+transformer = initialize_transformer(32633)  # UTM 33N for central Europe
+
+def export_metric(node_ids, lats, lons):
+    xs, ys = transform_node_batch(transformer, lats, lons)
+    # xs, ys are now metres — safe for buffering, area, distance, joins.
+    return node_ids, xs, ys
+```
+
+From here the projected arrays are handed to the index build described in [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/), or to the normalization stages in [Parsing & Tag Normalization Workflows](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/) when attributes must travel alongside geometry.
+
+## Reproducibility and validation standards
+
+Reproducible spatial ETL depends on deterministic transformation chains. Record the exact source and target EPSG codes and the PROJ version used for every run, and gate the pipeline on three checks:
+
+1. **Round-trip verification.** Transform to the projected CRS and back to EPSG:4326; deviation should stay below 1 mm for standard datums.
+2. **Topology preservation.** Confirm node adjacency and way connectivity survive transformation intact.
+3. **Datum-shift auditing.** Ensure no legacy NAD27 or ED50 shift is inadvertently applied when targeting modern WGS 84 derivatives.
+
+For authoritative grid-management and transformation guidance, consult the [PROJ documentation](https://proj.org/), and for OSM-specific precision and bounding-box conventions, the [OpenStreetMap Wiki coordinates reference](https://wiki.openstreetmap.org/wiki/Coordinates).
+
+## Go deeper
+
+- [Converting OSM coordinates to local CRS with PyProj](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/converting-osm-coordinates-to-local-crs-with-pyproj/) — a complete, production-tested reprojection implementation with worker caching, grid provisioning, and accuracy verification.
+
+## Related
+
+- [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) — the foundation this stage belongs to.
+- [PBF File Structure Deep Dive](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/) — how granularity, offsets, and delta-encoding produce the coordinates you reproject.
+- [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/) — the stage that consumes projected coordinates.
+- [Node-Way-Relation Data Model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/) — which primitives carry coordinates and which inherit them.
+- [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) — the chunking discipline applied across the pipeline.
+
+Up one level: [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/).

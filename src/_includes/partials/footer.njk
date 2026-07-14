@@ -1,0 +1,29 @@
+{%- from "partials/icons.njk" import icon -%}
+<footer class="site-footer" role="contentinfo">
+  <div class="container site-footer__inner">
+    <div class="site-footer__brand">
+      {% set logoClass = "logo--sm" %}
+      {% include "partials/logo.njk" %}
+      <div>
+        <div class="site-footer__title">{{ site.title }}</div>
+        <div class="site-footer__tagline">{{ site.description | truncate(120) }}</div>
+      </div>
+    </div>
+    <nav class="site-footer__nav" aria-label="Footer">
+      <h2 class="site-footer__heading">Sections</h2>
+      <ul>
+        <li><a href="{{ site.url }}/">{{ icon('home') }} Home</a></li>
+        {%- for s in site.sections %}
+        <li><a href="{{ site.url }}{{ s.url }}">{{ icon(s.icon) }} {{ s.title }}</a></li>
+        {%- endfor %}
+      </ul>
+    </nav>
+  </div>
+  <div class="container site-footer__base">
+    <small>&copy; {{ "" | year }} {{ site.title }}.</small>
+    <a class="site-footer__social" href="https://github.com/osm-data-processing" aria-label="OSM Data Processing on GitHub" target="_blank" rel="noopener me">
+      {{ icon('github', 'icon site-footer__social-icon') }}
+      <span>GitHub</span>
+    </a>
+  </div>
+</footer>

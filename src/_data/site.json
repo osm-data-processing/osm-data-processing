@@ -1,0 +1,62 @@
+{
+  "title": "OSM Data Processing & QA Pipelines",
+  "shortName": "OSM Pipelines",
+  "url": "https://www.osm-data-processing.org",
+  "description": "A technical resource for building, maintaining, and scaling automated OpenStreetMap data pipelines — PBF/XML parsing, tag normalization, topology cleaning, routing graph extraction, update diff sync, validation rules, and Python automation.",
+  "author": "OSM Data Processing",
+  "lang": "en",
+  "themeColor": "#2c6b56",
+  "backgroundColor": "#f7f5ef",
+  "sections": [
+    {
+      "title": "OSM Data Fundamentals & Architecture",
+      "url": "/osm-data-fundamentals-architecture/",
+      "icon": "globe",
+      "blurb": "Schema, serialization, spatial indexing, tag taxonomy, and licensing foundations for production-grade OSM pipelines."
+    },
+    {
+      "title": "Parsing & Tag Normalization Workflows",
+      "url": "/parsing-tag-normalization-workflows/",
+      "icon": "filter",
+      "blurb": "Async PBF parsing, parser selection, batch attribute mapping, regex-driven value cleaning, error handling, and routing-graph conversion."
+    },
+    {
+      "title": "OSM Replication & Diff Sync",
+      "url": "/osm-replication-diff-sync/",
+      "icon": "sync",
+      "blurb": "Keep local extracts current with .osc.gz change files, replication sequence numbers, full-history .osh.pbf, and automated minutely update pipelines."
+    },
+    {
+      "title": "OSM Data Quality & Validation",
+      "url": "/osm-data-quality-validation/",
+      "icon": "shield-check",
+      "blurb": "Author JOSM, Osmose, and Python validation rules; repair geometry; check routing-graph topology and tag consistency across the pipeline."
+    }
+  ],
+  "ctas": [
+    {
+      "label": "Data fundamentals",
+      "url": "/osm-data-fundamentals-architecture/",
+      "icon": "globe",
+      "color": "teal"
+    },
+    {
+      "label": "Parsing workflows",
+      "url": "/parsing-tag-normalization-workflows/",
+      "icon": "filter",
+      "color": "amber"
+    },
+    {
+      "label": "Replication & diff sync",
+      "url": "/osm-replication-diff-sync/",
+      "icon": "sync",
+      "color": "indigo"
+    },
+    {
+      "label": "Data quality & validation",
+      "url": "/osm-data-quality-validation/",
+      "icon": "shield-check",
+      "color": "rose"
+    }
+  ]
+}

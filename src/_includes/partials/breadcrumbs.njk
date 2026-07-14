@@ -1,0 +1,26 @@
+{%- from "partials/icons.njk" import icon -%}
+{% set crumbs = page.url | breadcrumbs %}
+{% if crumbs.length %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <ol class="breadcrumbs__list">
+    <li class="breadcrumbs__item"><a href="{{ site.url }}/">{{ icon('home') }} Home</a></li>
+    {%- for c in crumbs %}
+      {%- set isLast = loop.last %}
+      <li class="breadcrumbs__sep" aria-hidden="true">{{ icon('chevron-right') }}</li>
+      {%- set match = collections.contentPages | findByUrl(c.url) %}
+      {%- if match and match.data and match.data.title -%}
+        {%- set crumbTitle = match.data.title -%}
+      {%- else -%}
+        {%- set crumbTitle = c.slug | replace("-", " ") | title -%}
+      {%- endif -%}
+      <li class="breadcrumbs__item{% if isLast %} is-current{% endif %}">
+        {% if isLast %}
+          <span aria-current="page">{{ title or crumbTitle }}</span>
+        {% else %}
+          <a href="{{ site.url }}{{ c.url }}">{{ crumbTitle }}</a>
+        {% endif %}
+      </li>
+    {%- endfor %}
+  </ol>
+</nav>
+{% endif %}

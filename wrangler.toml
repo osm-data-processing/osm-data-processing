@@ -1,0 +1,15 @@
+name = "osm-data-processing-org"
+compatibility_date = "2025-05-01"
+
+# Static-assets-only Worker: serves the Eleventy build from ./_site.
+# No `main` script is needed — Cloudflare's assets pipeline handles routing.
+[assets]
+directory = "./_site"
+# Auto-handles "/path" ↔ "/path/" for clean URLs and serves
+# "/path/index.html" for directory-style requests.
+html_handling = "auto-trailing-slash"
+# Serve _site/404.html with a 404 status when no asset matches.
+not_found_handling = "404-page"
+
+[observability]
+enabled = true

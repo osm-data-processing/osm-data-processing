@@ -1,0 +1,37 @@
+{%- set crumbs = page.url | breadcrumbs -%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "@id": "{{ site.url }}{{ page.url }}#article",
+      "headline": {{ title | dump | safe }},
+      "description": {{ description | dump | safe }},
+      "url": "{{ site.url }}{{ page.url }}",
+      "inLanguage": "{{ site.lang }}",
+      "dateModified": "{{ page.date | dateIso }}",
+      "datePublished": "{{ page.date | dateIso }}",
+      "image": "{{ site.url }}/assets/icons/og-image.png",
+      "isPartOf": { "@id": "{{ site.url }}/#website" },
+      "publisher": { "@id": "{{ site.url }}/#org" },
+      "mainEntityOfPage": { "@type": "WebPage", "@id": "{{ site.url }}{{ page.url }}" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "{{ site.url }}/" }
+        {%- for c in crumbs -%}
+          {%- set match = collections.contentPages | findByUrl(c.url) -%}
+          {%- if match and match.data and match.data.title -%}
+            {%- set crumbTitle = match.data.title -%}
+          {%- else -%}
+            {%- set crumbTitle = c.slug | replace("-", " ") | title -%}
+          {%- endif -%}
+        ,{ "@type": "ListItem", "position": {{ loop.index + 1 }}, "name": {{ crumbTitle | dump | safe }}, "item": "{{ site.url }}{{ c.url }}" }
+        {%- endfor %}
+      ]
+    }
+  ]
+}
+</script>

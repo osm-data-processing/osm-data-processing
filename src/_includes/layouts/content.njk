@@ -1,0 +1,10 @@
+---
+layout: layouts/base.njk
+---
+<div class="container container--wide content-page">
+  {% include "partials/breadcrumbs.njk" %}
+  <article class="prose">
+    {{ content | safe }}
+  </article>
+  {% include "partials/related.njk" %}
+</div>

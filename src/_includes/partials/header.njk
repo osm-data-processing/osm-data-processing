@@ -1,0 +1,29 @@
+{%- from "partials/icons.njk" import icon -%}
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header" role="banner">
+  <div class="container container--wide site-header__inner">
+    <a class="site-header__brand" href="{{ site.url }}/" aria-label="{{ site.title }} home">
+      {% set logoClass = "logo--sm" %}
+      {% include "partials/logo.njk" %}
+      <span class="site-header__name">{{ site.shortName }}</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <ul class="site-nav__list">
+        <li>
+          <a class="site-nav__link{% if page.url == '/' %} is-active{% endif %}" href="{{ site.url }}/" {% if page.url == '/' %}aria-current="page"{% endif %}>
+            {{ icon('home', 'icon site-nav__icon') }}
+            <span>Home</span>
+          </a>
+        </li>
+        {%- for s in site.sections %}
+        <li>
+          <a class="site-nav__link{% if page.url | startsWith(s.url) %} is-active{% endif %}" href="{{ site.url }}{{ s.url }}" {% if page.url | startsWith(s.url) %}aria-current="page"{% endif %}>
+            {{ icon(s.icon, 'icon site-nav__icon') }}
+            <span>{{ s.title.split('&')[0] | trim }}</span>
+          </a>
+        </li>
+        {%- endfor %}
+      </ul>
+    </nav>
+  </div>
+</header>
