@@ -14,12 +14,13 @@ date: 2026-07-14
 
 Imagine a nightly job that merges yesterday's edits into a country extract, and one morning a downstream router starts sending drivers down a road that was deleted last week. The diff that deleted it was fetched but applied against a base that was already a version ahead, so the delete silently no-op'd and the ghost road survived. That is the failure this guide exists to prevent: applying an OsmChange file is not a blind append but a version-aware merge, and getting the version arithmetic wrong corrupts state without raising an error. This reference is part of the broader [OSM Replication & Diff Sync](https://www.osm-data-processing.org/osm-replication-diff-sync/) section, which frames why an extract must track upstream at all; here the focus narrows to the single operation of taking one or more `.osc.gz` files and a base `.osm.pbf` and producing a correct, updated PBF.
 
-<svg viewBox="0 0 1000 380" role="img" aria-label="Applying one OsmChange diff to a base PBF. On the left, base.osm.pbf at sequence N feeds an apply-changes merge engine. A diff file for sequence N plus one enters the engine on three lanes: a create lane adds new elements, a modify lane replaces existing elements by version, and a delete lane marks elements no longer visible. The engine emits base plus one dot osm dot pbf at sequence N plus one." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 1000 380" role="img" aria-label="Applying one OsmChange diff to a base PBF. On the left, base.osm.pbf at sequence N feeds an apply-changes merge engine. A diff file for sequence N plus one enters the engine on three lanes: a create lane adds new elements, a modify lane replaces existing elements by version, and a delete lane marks elements no longer visible. The engine emits base plus one dot osm dot pbf at sequence N plus one." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Applying a single .osc diff to a base PBF through the three operation lanes</title>
   <desc>A base PBF at sequence N and a change file at sequence N+1 both feed an apply-changes engine. The change file splits into create, modify, and delete lanes; the engine merges them by version and writes an updated PBF at sequence N+1.</desc>
   <defs>
     <marker id="osc-apply-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="380" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="26" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">One diff, three lanes, one version-aware merge</text>
   <!-- base -->
   <rect x="24" y="150" width="170" height="72" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -63,6 +64,35 @@ The tooling itself: install `osmium-tool` (the `osmium` CLI, version 1.11 or lat
 ## The OsmChange Format Reference
 
 An `.osc` file is XML with a root `<osmChange version="0.6">` and a `generator` attribute. Inside it, operation blocks group elements by the action to perform. The exact fields that govern application are:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 230" role="img" aria-labelledby="osc-ops-t osc-ops-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osc-ops-t">What each OsmChange operation block carries and how an applier must treat it</title>
+  <desc id="osc-ops-d">Three panels. A create block carries the full new object at version one and must fail if the identifier already exists. A modify block carries the entire new state of the object, not a field-level patch, and replaces the prior version wholesale; applying it over a base more than one version behind leaves a hole. A delete block carries only the object stub with visible set to false at its new version, so the payload is not the object that was removed and must be looked up locally if it is needed.</desc>
+  <rect x="0" y="0" width="880" height="230" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three blocks, three different contracts</text>
+  <rect x="26" y="52" width="258" height="136" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">&lt;create&gt;</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Full object, version = 1</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Tags and refs all present</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Fails if the id already exists</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Safe to replay: id collision is loud</text>
+  <rect x="310" y="52" width="258" height="136" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">&lt;modify&gt;</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Full new state, not a patch</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Replaces the prior version outright</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Valid only against version n-1</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Replaying an old one silently reverts</text>
+  <rect x="594" y="52" width="258" height="136" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">&lt;delete&gt;</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Stub only: id, version, visible=false</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">No tags, no geometry, no refs</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">What was removed is not in the file</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Read your own copy first if you need it</text>
+  <text x="440" y="214" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">All three name a version. Versions, not timestamps, are what make application idempotent.</text>
+</svg>
+<figcaption>The delete block is the one that surprises people: it does not contain the geometry or tags being removed. If your pipeline needs to know what disappeared, it has to read that from its own copy before applying.</figcaption>
+</figure>
 
 | Field | Appears on | Meaning | Consequence if mishandled |
 | --- | --- | --- | --- |
@@ -203,6 +233,28 @@ Route genuinely defective change files — truncated downloads, gzip CRC failure
 ## Performance and Scale Considerations
 
 The cost of `apply-changes` is dominated by rewriting the base, not by the diff. Because a PBF is a compressed, block-structured container, merging a 200 KB minutely diff into an 8 GB regional file still means decompressing, merging, and recompressing the whole base — so a naive minutely loop that rewrites a large PBF every 60 seconds spends nearly all its time on I/O for a handful of changed objects. Two mitigations matter. For file-based workflows, batch: accumulate several minutely diffs and apply them in one `apply-changes` pass so the base is rewritten once per batch rather than once per diff. For high-frequency tracking, apply into a database rather than a file, where only the changed rows are touched — the subject of [Applying Minutely Diffs to a PostGIS Database](https://www.osm-data-processing.org/osm-replication-diff-sync/applying-osc-change-files-with-osmium/applying-minutely-diffs-to-a-postgis-database/).
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 240" role="img" aria-labelledby="osc-batch-t osc-batch-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osc-batch-t">Wall-clock cost of applying 1440 minutely diffs one at a time against merged in batches</title>
+  <desc id="osc-batch-d">A bar chart of wall-clock minutes to apply one day of minutely diffs, 1440 files, to a country extract. Applying each diff with a separate apply-changes call takes 96 minutes. Merging into hourly batches with osmium merge-changes first takes 14 minutes. Merging the whole day into one change file takes 6 minutes.</desc>
+  <rect x="0" y="0" width="880" height="240" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Merge the diffs, then apply once — the rewrite is the cost</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">one day of minutely diffs (1 440 files) applied to a 1.2 GB country extract</text>
+  <line x1="250" y1="68" x2="250" y2="186" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">apply each diff separately</text>
+  <rect x="250" y="74" width="452" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="712" y="89" font-size="11" fill="currentColor" opacity="0.9">96 min · 1 440 full-file rewrites</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">merge-changes hourly, apply 24×</text>
+  <rect x="250" y="116" width="66" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="326" y="131" font-size="11" fill="currentColor" opacity="0.9">14 min · 24 rewrites</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">merge-changes once, apply 1×</text>
+  <rect x="250" y="158" width="28" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="288" y="173" font-size="11" fill="currentColor" opacity="0.9">6 min · 1 rewrite</text>
+  <text x="440" y="222" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The merged file is also smaller than the sum of its parts, because an object edited forty times in a day appears once in the merge.</text>
+</svg>
+<figcaption>Each <code>apply-changes</code> call rewrites the whole target file, so the cost is dominated by the number of invocations rather than the volume of change. Merging first turns 1440 rewrites into one.</figcaption>
+</figure>
 
 libosmium reads and writes streams, so peak memory is bounded by the location cache for reference resolution, not by file size; on continental bases, point osmium at a disk-backed index (`--index-type` / a location store) so way reconstruction during history-aware application does not exhaust RAM.
 

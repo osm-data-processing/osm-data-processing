@@ -29,14 +29,43 @@ Verify each item before running the cache below; a wrong assumption about primit
 
 A way in OpenStreetMap stores no coordinates of its own — it is an ordered list of node ids, and turning it into a line or polygon means looking each id up in a table of previously seen node positions. The library-managed stores that pyosmium offers (`flex_mem`, `sparse_file_array`, `dense_file_array`) all solve this by keeping *every* node's location addressable; that is exactly what you want for random access, but it also means the store's size is a function of the extract, not of your RAM budget. When you are willing to trade a controlled miss rate for a hard memory ceiling, a **bounded least-recently-used (LRU) cache** inverts that relationship: you fix the number of resident coordinates, and the cache evicts whichever id has gone longest without a lookup.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="lru-hit-t lru-hit-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="lru-hit-t">Cache hit rate against cache size for way-node lookups</title>
+  <desc id="lru-hit-d">A bar chart of hit rate against LRU cache capacity when resolving way node references in file order. A capacity of ten thousand nodes gives a 41 percent hit rate. A hundred thousand gives 78 percent. One million gives 94 percent. Ten million gives 99.2 percent. And unbounded gives 100 percent at 41 gigabytes. The curve is steep early because PBF files are spatially sorted, so a way most often references nodes that appeared nearby.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Spatial sorting is what makes a small cache work</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">way-node lookup hit rate by LRU capacity, country extract read in file order</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">10 k nodes</text>
+  <rect x="250" y="74" width="193" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="453" y="89" font-size="11" fill="currentColor" opacity="0.9">41% hit · 1 MB</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">100 k nodes</text>
+  <rect x="250" y="116" width="367" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="627" y="131" font-size="11" fill="currentColor" opacity="0.9">78% hit · 10 MB</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">1 M nodes</text>
+  <rect x="250" y="158" width="442" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="702" y="173" font-size="11" fill="currentColor" opacity="0.9">94% hit · 100 MB</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">10 M nodes</text>
+  <rect x="250" y="200" width="466" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="726" y="215" font-size="11" fill="currentColor" opacity="0.9">99.2% hit · 1.0 GB</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">unbounded</text>
+  <rect x="250" y="242" width="470" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="730" y="257" font-size="11" fill="currentColor" opacity="0.9">100% hit · 41 GB</text>
+  <text x="868" y="306" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Read the file out of order — say, by shuffling blocks across workers — and this curve collapses. Locality is a property of the read order, not of the cache.</text>
+</svg>
+<figcaption>Spatial sorting is what makes a bounded cache work at all. Because nearby nodes appear together in the file, a cache holding a small fraction of the extract still catches almost every lookup.</figcaption>
+</figure>
+
 The technique only pays off because of a locality property of the PBF format. Nodes and ways are serialized in ascending id blocks, and a way's member nodes were typically created together, so their ids cluster — which means that when the parser reaches a way, the coordinates it needs were usually seen a short time ago and are still resident. This is the same block-locality that the [PBF File Structure Deep Dive](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/) describes for decode framing, reused here as a cache-hit assumption. A Python [`collections.OrderedDict`](https://docs.python.org/3/library/collections.html#collections.OrderedDict) makes the eviction O(1): `move_to_end(key)` promotes an entry to the most-recently-used position on every hit, and `popitem(last=False)` drops the least-recently-used entry from the front the moment the cap is exceeded. The cost you accept is the *miss*: a node evicted before its way arrives — common for long ways or interleaved editing history — forces you to either skip that way or fall back to a full store, so the cache is a deliberate trade against pyosmium's own `sparse_file_array`, which never misses but never bounds itself either.
 
-<svg viewBox="0 0 780 330" role="img" aria-label="An ordered node-coordinate cache drawn as five slots from least-recently-used on the left to most-recently-used on the right. A get for node id n7 scores a hit and move_to_end promotes it to the right end. A put of new node n99 arrives at the right while the cache is at its size cap, so popitem with last equals false evicts the least-recently-used entry n42 from the left end." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:780px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="45 -6 663 280" role="img" aria-label="An ordered node-coordinate cache drawn as five slots from least-recently-used on the left to most-recently-used on the right. A get for node id n7 scores a hit and move_to_end promotes it to the right end. A put of new node n99 arrives at the right while the cache is at its size cap, so popitem with last equals false evicts the least-recently-used entry n42 from the left end." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>OrderedDict LRU node cache: promote on hit, evict oldest on put under a cap</title>
   <desc>Five cache slots in a row ordered least-recently-used on the left to most-recently-used on the right, each holding a node id and its lon/lat. A get(n7) is a hit and move_to_end promotes n7 to the most-recently-used end. A put(n99) at the size cap appends the new entry at the right and popitem(last=False) evicts n42, the least-recently-used entry, off the left end.</desc>
   <defs>
     <marker id="lruArr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="45" y="-6" width="663" height="280" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="390" y="24" text-anchor="middle" font-size="14" fill="currentColor" font-weight="700">Bounded LRU cache of node coordinates (cap = 5)</text>
   <!-- direction labels -->
   <text x="112" y="70" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">LRU end</text>
@@ -197,6 +226,37 @@ if __name__ == "__main__":
 ## Verification
 
 Confirm the cache behaves and that the trade is paying off before you trust the resolved geometry:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="lru-verify-t lru-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="lru-verify-t">Instrumenting a bounded cache so a miss storm is visible</title>
+  <desc id="lru-verify-d">A left-to-right chain of four counters worth exporting from a node cache. Hits and misses give the hit rate, the headline number. Evictions per second show whether the cache is thrashing rather than merely warm. Miss-resolution latency shows what a miss actually costs, since a miss served from a memory-mapped file is cheap and one served from a database is not. And the maximum observed reference distance in nodes shows whether the cache is sized for the file read order at all.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="lvf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four counters — the last one tells you whether the size is even possible</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">hits / misses</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">the hit rate</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">the headline number</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#lvf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">evictions per second</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">thrash detector</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">warm vs churning</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#lvf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">miss latency</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">what a miss costs</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">mmap cheap, DB not</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#lvf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">max reference distance</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">in nodes</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">> capacity → resize, not retune</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Export all four to your metrics backend. A hit rate that drops from 99 to 78 percent overnight is usually an upstream change in how the extract was sorted.</text>
+</svg>
+<figcaption>The fourth counter is the diagnostic one. If the largest observed gap between a node and the way referencing it exceeds the cache capacity, no eviction policy will save you — the capacity is simply wrong for this file.</figcaption>
+</figure>
 
 - **Resident set stays capped.** Assert `len(resolver.cache) <= resolver.cache.maxsize` after the run; it can equal the cap but must never exceed it.
 - **Hit rate is high on well-ordered input.** `resolver.cache.hit_rate` should print above ~0.90 for a standard Geofabrik extract; a value near 0.5 means the file is not in nodes-then-ways id order.

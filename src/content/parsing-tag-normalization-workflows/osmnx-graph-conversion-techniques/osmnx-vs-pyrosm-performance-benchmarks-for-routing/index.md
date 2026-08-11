@@ -28,7 +28,34 @@ date: 2026-06-26
 
 The performance gap is structural, not incidental. Pyrosm wraps libosmium through Cython and reads a PBF in one sequential pass into GeoDataFrames backed by Apache Arrow arrays; it never materializes a `networkx` graph until you explicitly call `get_network()` with `nodes=True`, so peak memory stays close to the on-disk feature volume. OSMnx instead builds a `networkx.MultiDiGraph` immediately and runs `ox.simplify_graph()` to merge degree-2 nodes during construction, trading RAM for an out-of-the-box, routing-ready topology. The decision is therefore ingestion velocity versus immediate routing readiness — exactly the trade this page measures and the reason it sits under [OSMnx Graph Conversion Techniques](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/osmnx-graph-conversion-techniques/). Because edge `length` and `travel_time` are meaningless until the graph is projected, both paths still depend on the projection rules covered in [Coordinate Reference Systems in OSM](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/), and both reuse the same deterministic value coercion from [Value Standardization & Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/) so the benchmark compares construction cost, not tag-cleaning cost.
 
-<svg viewBox="0 0 760 446" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Side-by-side comparison of two routing-graph build pipelines reading the same 4.1 GB us-california-latest.osm.pbf extract. Path A, OSMnx one-call: graph_from_xml with simplify=True parses, builds, and simplifies the MultiDiGraph in one pass, then add_edge_speeds and add_edge_travel_times weight it; peak RAM lands here because the whole graph plus simplify interim structures sit in memory, giving about 350 seconds and about 18 GB peak RSS. Path B, Pyrosm then graph_from_gdfs: OSM.get_network with nodes=True parses to Arrow-backed GeoDataFrames, ox.graph_from_gdfs assembles the MultiDiGraph, then the identical add_edge_speeds and add_edge_travel_times weighting runs; about 130 seconds and about 4 GB peak RSS. Both paths end at a routable MultiDiGraph ready for A* on travel_time, and routing 10,000 origin-destination pairs takes about 5 seconds on either graph, so construction cost, not routing, is what differs. Path B is the faster, lower-memory winner." style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 272" role="img" aria-labelledby="graph-shape-t graph-shape-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="graph-shape-t">The two libraries produce different graphs, not the same graph at different speeds</title>
+  <desc id="graph-shape-d">Two panels. An OSMnx graph is a MultiDiGraph with simplification applied by default, edge geometries retained as LineStrings, and a projection step available; it is ready for NetworkX algorithms. A pyrosm graph is produced from GeoDataFrames of nodes and edges, unsimplified unless you ask, with the edge frame available for vectorised work; it is ready for a routing engine that wants tables. Comparing their build times without saying which graph you needed is comparing two different jobs.</desc>
+  <rect x="0" y="0" width="880" height="272" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Two different outputs — pick by what consumes the graph</text>
+  <rect x="26" y="52" width="401" height="178" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">OSMnx</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Output: NetworkX MultiDiGraph</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Simplified by default</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Edge geometry kept as LineString</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Projection helper included</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Consumed by: NetworkX algorithms</text>
+  <text x="40" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Slower to build, less to do after</text>
+  <rect x="453" y="52" width="401" height="178" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">pyrosm</text>
+  <text x="467" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Output: node and edge GeoDataFrames</text>
+  <text x="467" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Unsimplified unless requested</text>
+  <text x="467" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Edge attributes in a columnar frame</text>
+  <text x="467" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Project it yourself</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Consumed by: table-oriented routers</text>
+  <text x="467" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Faster to build, more to do after</text>
+  <text x="440" y="256" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Benchmark the end state you need — a simplified projected graph — rather than the call that happens to be named "graph_from_pbf".</text>
+</svg>
+<figcaption>This is the reason benchmark comparisons between the two so often disagree: one team measures the graph they need and the other measures the graph the tool makes by default.</figcaption>
+</figure>
+
+<svg viewBox="0 0 760 446" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Side-by-side comparison of two routing-graph build pipelines reading the same 4.1 GB us-california-latest.osm.pbf extract. Path A, OSMnx one-call: graph_from_xml with simplify=True parses, builds, and simplifies the MultiDiGraph in one pass, then add_edge_speeds and add_edge_travel_times weight it; peak RAM lands here because the whole graph plus simplify interim structures sit in memory, giving about 350 seconds and about 18 GB peak RSS. Path B, Pyrosm then graph_from_gdfs: OSM.get_network with nodes=True parses to Arrow-backed GeoDataFrames, ox.graph_from_gdfs assembles the MultiDiGraph, then the identical add_edge_speeds and add_edge_travel_times weighting runs; about 130 seconds and about 4 GB peak RSS. Both paths end at a routable MultiDiGraph ready for A* on travel_time, and routing 10,000 origin-destination pairs takes about 5 seconds on either graph, so construction cost, not routing, is what differs. Path B is the faster, lower-memory winner." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>OSMnx one-call build versus Pyrosm-parse plus graph_from_gdfs, with measured time and peak RSS</title>
   <desc>Two pipelines read the same 4.1 GB California PBF. Path A (OSMnx graph_from_xml with simplify) takes about 350 s at about 18 GB peak RSS; Path B (Pyrosm get_network into Arrow GeoDataFrames, then graph_from_gdfs) takes about 130 s at about 4 GB peak RSS. Both apply identical add_edge_speeds and add_edge_travel_times weighting and produce the same routable MultiDiGraph; routing 10k pairs is about 5 s on either, so only construction cost differs and Path B wins.</desc>
   <defs>
@@ -36,6 +63,7 @@ The performance gap is structural, not incidental. Pyrosm wraps libosmium throug
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="446" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- shared input -->
     <rect x="290" y="28" width="180" height="42" rx="6" fill="currentColor" fill-opacity="0.05" stroke="currentColor" stroke-width="1.6"/>
@@ -182,6 +210,37 @@ def compare(pbf_path: str) -> list[dict[str, float | str]]:
 ## Verification
 
 Run `compare("us-california-latest.osm.pbf")` and check the returned records against the reference matrix below. Measurements were taken on Ubuntu 22.04 LTS, AMD EPYC 7763 (64-core), 128 GB DDR4, Python 3.11.7, NetworkX 3.2.1, on the 4.1 GB California extract, with a routing workload of 10,000 randomized origin-destination pairs using A* on `travel_time` weights.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="graph-equiv-t graph-equiv-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="graph-equiv-t">Checks that two graph builds describe the same network</title>
+  <desc id="graph-equiv-d">A left-to-right chain of four equivalence checks between graphs from different libraries. Node and edge counts will legitimately differ if one is simplified, so compare after simplifying both. Total network length must match within a small tolerance, since simplification preserves length. The largest connected component share must match, since simplification does not change connectivity. And a sample of shortest-path distances between the same coordinate pairs must agree within metres.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="geq" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Compare what routing depends on, not what is easy to count</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">counts after simplifying both</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">not before</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">simplification changes counts</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#geq)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">total network length</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">within 0.1%</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">simplification preserves it</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#geq)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">largest component share</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">must match</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">connectivity is invariant</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#geq)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">sample shortest paths</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">agree within metres</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">the check that matters</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Keep a fixed set of a few hundred origin–destination pairs as the comparison fixture. It is the cheapest regression test a routing pipeline can have.</text>
+</svg>
+<figcaption>The path-distance check is the only one that tests the thing you actually care about. Two graphs can agree on counts and length and still route differently if one dropped a turn restriction.</figcaption>
+</figure>
 
 <div class="table-scroll" markdown="1">
 

@@ -13,12 +13,13 @@ date: 2026-07-14
 # OSM Replication & Diff Sync
 
 <figure class="diagram-wrap">
-<svg viewBox="0 0 1060 300" role="img" aria-labelledby="repl-flow-title repl-flow-desc" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1060px;display:block;margin:1.5rem auto;font-family:inherit;color:var(--c-ink)">
+<svg viewBox="0 0 1060 300" role="img" aria-labelledby="repl-flow-title repl-flow-desc" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;color:var(--c-ink)">
   <title id="repl-flow-title">OSM replication pipeline: from a base extract to a continuously updated dataset</title>
   <desc id="repl-flow-desc">A horizontal data-flow diagram. A base extract carries a stored sequence number. A replication server publishes state.txt and sequence N. The pipeline fetches ordered .osc.gz diffs, applies them with apply-changes, and writes an updated .osm.pbf or PostGIS database that feeds downstream consumers. When a sequence gap or a bad diff is detected, the flow branches into gap recovery and quarantine before resuming.</desc>
   <defs>
     <marker id="repl-flow-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1060" height="300" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- top row edges -->
   <line x1="160" y1="86" x2="188" y2="86" stroke="currentColor" stroke-width="1.6" marker-end="url(#repl-flow-arrow)"/>
   <line x1="356" y1="86" x2="384" y2="86" stroke="currentColor" stroke-width="1.6" marker-end="url(#repl-flow-arrow)"/>
@@ -74,6 +75,28 @@ Two properties of the format govern correct application. First, **version monoto
 ## Replication Streams and Cadence
 
 OSM publishes its change stream at three cadences, each a directory tree of numbered diffs on a replication server (the canonical one being `planet.openstreetmap.org/replication/`, mirrored by Geofabrik for regional extracts):
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 240" role="img" aria-labelledby="cadence-t cadence-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="cadence-t">Typical diff size, freshness and catch-up cost for the three replication cadences</title>
+  <desc id="cadence-d">A bar chart comparing minutely, hourly and daily replication for a planet stream. A minutely diff averages 480 kilobytes and leaves the copy at most 60 seconds behind, but a week of downtime means 10 080 files to replay. An hourly diff averages 28 megabytes with an hour of lag and 168 files for the same week. A daily diff averages 640 megabytes with a day of lag and 7 files.</desc>
+  <rect x="0" y="0" width="880" height="240" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Cadence sets both how fresh you are and how expensive a week offline is</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">average compressed diff size per file</text>
+  <line x1="250" y1="68" x2="250" y2="186" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">daily</text>
+  <rect x="250" y="74" width="368" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="628" y="89" font-size="11" fill="currentColor" opacity="0.9">640 MB/file · ≤24 h stale · 7 files per lost week</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">hourly</text>
+  <rect x="250" y="116" width="16" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="276" y="131" font-size="11" fill="currentColor" opacity="0.9">28 MB/file · ≤60 min stale · 168 files per lost week</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">minutely</text>
+  <rect x="250" y="158" width="6" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="266" y="173" font-size="11" fill="currentColor" opacity="0.9">480 kB/file · ≤60 s stale · 10 080 files per lost week</text>
+  <text x="868" y="222" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Each file costs an HTTP round trip and a state write, so replaying 10 080 minutely diffs is dominated by request latency, not by the 4.7 GB of payload.</text>
+</svg>
+<figcaption>Cadence is a choice about recovery, not only freshness. The minutely stream is the freshest and by far the most expensive to catch up on, because catch-up cost is a file count, not a byte count.</figcaption>
+</figure>
 
 | Stream | Path suffix | Typical diff size | Latency to live | Use case |
 | --- | --- | --- | --- | --- |
@@ -152,6 +175,37 @@ The end-to-end assembly — a fetch-apply-record loop, a lock to prevent overlap
 ## Provenance and ODbL for Derived State
 
 Replication changes the licensing picture in a way a static extract does not: a continuously updated database is a *derivative database* under the Open Database License (ODbL), and its share-alike and attribution obligations attach to the state at every point in time, not just at initial import. That makes provenance an engineering requirement, not a footnote. Every update cycle should append to an immutable ledger: the sequence number applied, the source stream URL, the `state.txt` timestamp, and the checksum of the diff file. This ledger is simultaneously your reproducibility record (any past state can be rebuilt by replaying the ledger from a known base) and your compliance record (you can prove, for any published extract, exactly which upstream edits it incorporates and attribute "© OpenStreetMap contributors" against a dated source).
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="prov-chain-t prov-chain-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="prov-chain-t">The provenance record a diff-applying pipeline must carry forward</title>
+  <desc id="prov-chain-d">A left-to-right chain. The base extract records its source URL and download date. Each applied diff records its sequence number and timestamp. The current dataset therefore carries a sequence range rather than a single date. The published output attaches the ODbL attribution together with that sequence range, so a consumer can reproduce the exact state.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="prov" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Provenance survives replication only if it records sequences, not dates</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">base extract</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">source URL + SHA</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">seq 6 102 400</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#prov)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">applied diffs</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">seq 6 102 401 …</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">… 6 123 456, in order</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#prov)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">current dataset</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">range, not a date</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">plus applied-at clock</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#prov)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">published output</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">ODbL attribution</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">+ the sequence range</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Two consumers given the same sequence range can rebuild byte-identical data; two given the same calendar date cannot.</text>
+</svg>
+<figcaption>A single "data as of" date stops being true the moment you start applying diffs. What makes a derived dataset reproducible is the sequence range, because a sequence number names one immutable file.</figcaption>
+</figure>
 
 The keep-open clause of the ODbL means that if you redistribute the updated database you cannot layer technical restrictions on it, and the share-alike clause means adaptations you publish inherit the licence — both of which are far easier to satisfy when provenance is stamped automatically at each cycle than when reconstructed after the fact. The authoritative obligations are the official [OpenStreetMap Copyright & License](https://www.openstreetmap.org/copyright) terms; pin your interpretation to a dated copy in the same ledger that records your sequences, so licence state and data state are auditable together.
 

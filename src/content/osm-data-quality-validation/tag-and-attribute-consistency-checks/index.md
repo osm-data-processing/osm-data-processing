@@ -14,12 +14,13 @@ date: 2026-07-14
 
 An OSM element can carry perfect geometry, sit in the right place, and still be wrong — because its tags say two contradictory things at once. An element tagged both `highway=residential` and `building=yes` is not a road or a house; it is a data error that renders twice, routes as a street, and imports as a structure depending on which consumer reads it first. Tag defects are insidious precisely because nothing about a free-form key-value map forces internal consistency: the format accepts `maxspeed=fixme`, a `layer` of `bridge`, or a road with no name and no complaint. This guide, part of the broader [OSM Data Quality & Validation](https://www.osm-data-processing.org/osm-data-quality-validation/) discipline, treats the tag dictionary as a schema to be enforced rather than a bag of strings to be trusted, and it lays out the rule classes and the engine that check every element against them.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 340" role="img" aria-label="A tag-rule evaluation pipeline. An element's tag dictionary enters and is dispatched through five rule stages in sequence: deprecation checks for obsolete keys and values, conflict checks for mutually exclusive tags, value-type checks that maxspeed is numeric and layer is an integer, required-tag checks per feature class, and cross-tag consistency checks. Each stage emits findings tagged by severity, and all findings converge into a single severity-ranked report." style="width:100%;max-width:1080px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 -6 1068 292" role="img" aria-label="A tag-rule evaluation pipeline. An element's tag dictionary enters and is dispatched through five rule stages in sequence: deprecation checks for obsolete keys and values, conflict checks for mutually exclusive tags, value-type checks that maxspeed is numeric and layer is an integer, required-tag checks per feature class, and cross-tag consistency checks. Each stage emits findings tagged by severity, and all findings converge into a single severity-ranked report." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Tag-rule evaluation pipeline from element tags to a severity-ranked report</title>
   <desc>A tag dictionary flows left to right through five rule stages — deprecation, conflict, value-type, required-tag, and cross-tag consistency — each of which emits findings by severity, all converging into one ranked findings report.</desc>
   <defs>
     <marker id="tac-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="4" y="-6" width="1068" height="292" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="540" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Five rule stages turn a tag map into ranked findings</text>
   <!-- input -->
   <rect x="20" y="130" width="128" height="72" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -85,6 +86,44 @@ Tag QA only makes sense against a reference vocabulary, so anchor these first. T
 ## Rule Classes: A Taxonomy of Tag Defects
 
 Tag QA is tractable because every defect falls into one of five rule classes, each with a distinct evaluation shape.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 318" role="img" aria-labelledby="tagdef-classes-t tagdef-classes-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="tagdef-classes-t">Five classes of tag defect and whether each can be fixed automatically</title>
+  <desc id="tagdef-classes-d">A grid of five tag defect classes against whether an automatic fix is safe and what the fix would be. A deprecated key with a single documented replacement is safely renamed. A value with a case or whitespace variant is safely folded. A value outside an enumerated domain is not safely fixed and goes to review. A pair of tags that contradict each other cannot be resolved automatically because either could be the correct one. A required companion tag that is missing cannot be invented and must be flagged.</desc>
+  <rect x="0" y="0" width="880" height="318" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Two of five defect classes are safe to fix automatically</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">auto-fixable?</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">action</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">deprecated key, one replacement</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">rename, log the mapping</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">case or whitespace variant</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">fold to canonical form</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">value outside the domain</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">flag, route to review</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">two tags contradict</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">quarantine — either could be right</text>
+  <text x="198" y="264" text-anchor="end" font-size="11.5" fill="currentColor">required companion missing</text>
+  <rect x="213" y="244" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="264" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="535" y="244" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="264" text-anchor="middle" font-size="10.5" fill="currentColor">flag; a value cannot be invented</text>
+  <text x="868" y="300" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Keep the auto-fix log queryable. "Which of my rows were rewritten, and by which rule" is the first question asked when a downstream number looks wrong.</text>
+</svg>
+<figcaption>Only the first two are safe to automate, and they are also the two that make up most of the volume — which is what makes automated tag cleaning worth doing at all.</figcaption>
+</figure>
 
 - **Deprecation** — a key or value the community has retired in favour of a successor. These are lookups against a deprecated→replacement map: `highway=ford` moved to `ford=yes` on the crossing node, and many `barrier` sub-values were consolidated. Deprecation is usually *informational*: the data still parses, but it should be migrated.
 - **Conflict** — two keys that must not co-occur on the same element because they assign incompatible primary types. `highway` and `building` on one element is the canonical case; `natural=water` with `building=yes` is another. Conflicts are *errors* — a consumer cannot know which type wins.
@@ -230,6 +269,34 @@ Each rule class has a signature failure, and each fix belongs upstream in the so
 ## Performance & Scale Considerations
 
 The engine is `O(elements × rules)`, and both factors are controllable. The rule count stays small — a mature set is dozens of rules, not thousands — so the dominant cost is the element scan. On a streaming source the checks add negligible overhead because they touch only the tag dictionary, which is already in memory for each element; there is no geometry reconstruction and no spatial query. The one trap is recompiling regular expressions: precompile every `value_type` pattern once at rule-load time, as the module above does, rather than inside the per-element loop, or a planet-scale scan pays the compile cost hundreds of millions of times.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="tagdef-cost-t tagdef-cost-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="tagdef-cost-t">Where the time goes in a tag-consistency pass</title>
+  <desc id="tagdef-cost-d">A bar chart of nanoseconds per object for five tag-check implementations. A set membership test on the key is 40 nanoseconds. A dictionary lookup for a replacement is 55. A precompiled regex match on the value is 380. Compiling the regex inside the loop is 24 000. And a per-object call out to a reference database is 210 000, three orders of magnitude worse than everything else.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Two mistakes account for the entire cost of a tag pass</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">nanoseconds per object, single core</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">key in a set</text>
+  <rect x="250" y="74" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="89" font-size="11" fill="currentColor" opacity="0.9">40 ns</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">dict lookup for replacement</text>
+  <rect x="250" y="116" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="131" font-size="11" fill="currentColor" opacity="0.9">55 ns</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">precompiled regex match</text>
+  <rect x="250" y="158" width="6" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="266" y="173" font-size="11" fill="currentColor" opacity="0.9">380 ns</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">re.compile inside the loop</text>
+  <rect x="250" y="200" width="54" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="314" y="215" font-size="11" fill="currentColor" opacity="0.9">24 000 ns · 63× worse</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">per-object reference DB query</text>
+  <rect x="250" y="242" width="470" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="730" y="257" font-size="11" fill="currentColor" opacity="0.9">210 000 ns · 550× worse</text>
+  <text x="440" y="306" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">At 400 million objects the difference between the third row and the last is nine minutes against nineteen hours.</text>
+</svg>
+<figcaption>The two slow rows are both avoidable by moving work out of the loop: compile regexes once at rule load, and load the reference data into memory once rather than querying it per object.</figcaption>
+</figure>
 
 Two levers help at scale. First, **short-circuit on primary tag**: index rules by their trigger key so an element with no `highway` skips every highway rule instead of testing each one — a dictionary from key to relevant rules turns the inner loop from "all rules" into "applicable rules." Second, **batch findings to columnar output**: emit findings as rows and write them to Parquet or a database in chunks, so a multi-million-finding report on a dirty continental extract never materializes as one giant Python list. For frame-based inputs, the same rules vectorize cleanly over pandas columns, which is the path the child [Flagging Deprecated OSM Tags in a Pipeline](https://www.osm-data-processing.org/osm-data-quality-validation/tag-and-attribute-consistency-checks/flagging-deprecated-osm-tags-in-a-pipeline/) walkthrough takes for the deprecation class.
 

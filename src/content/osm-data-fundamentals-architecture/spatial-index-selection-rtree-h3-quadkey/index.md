@@ -14,12 +14,13 @@ date: 2026-07-14
 
 The spatial index you pick for an OpenStreetMap workload is a decision made once and paid on every query for the life of the pipeline, and the wrong choice fails quietly rather than loudly. A team indexing a national point-of-interest layer into H3 resolution 8 to answer "which shops fall inside this administrative boundary" ships a plausible-looking service that is subtly wrong at every border: hexagons approximate the polygon, straddle its edge, and count cafés on the far side of a river as inside the district. Another team reaches for an R-tree to drive a country-wide density heatmap and discovers the tree gives them fast candidate lookups but no natural cell to aggregate into, so they bolt on an ad-hoc grid and re-derive it inconsistently across reports. Neither failure is a bug in the library — both are a mismatch between the index's geometry and the question being asked. This page is the selection guide for that decision, sitting inside the broader [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) layer, and it is the companion to the how-to-build reference: where [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/) shows how to construct a disk-backed R-tree, this page is the decision matrix it points to for *which* index to construct in the first place.
 
-<svg viewBox="0 0 1000 470" role="img" aria-label="Decision tree for selecting an OSM spatial index. Starting from the question of what the dominant query must do, four branches lead to recommendations: when the query needs true geometry for an exact join or point-in-polygon prefilter, choose an R-tree; when results must align to slippy-map tiles, choose a Quadkey or grid; when cells must have equal area for aggregation, choose H3; and when the workload covers whole-globe regions, choose S2." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 1000 470" role="img" aria-label="Decision tree for selecting an OSM spatial index. Starting from the question of what the dominant query must do, four branches lead to recommendations: when the query needs true geometry for an exact join or point-in-polygon prefilter, choose an R-tree; when results must align to slippy-map tiles, choose a Quadkey or grid; when cells must have equal area for aggregation, choose H3; and when the workload covers whole-globe regions, choose S2." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Decision tree mapping an OSM workload to a recommended spatial index</title>
   <desc>A start box asks what the dominant query must do. Four fanning branches lead to four recommendation cards. The branch labelled "need true geometry?" leads to an R-tree card, best for spatial joins, point-in-polygon prefilters, and varying-density data. The branch labelled "aligned to map tiles?" leads to a Quadkey or grid card, best for map tiling on z/x/y and coarse prefiltering. The branch labelled "equal-area cells?" leads to an H3 card, best for point-of-interest aggregation, ring-neighbour traversal, and equal-area statistics. The branch labelled "whole-globe regions?" leads to an S2 card, best for region covering with spherical cells.</desc>
   <defs>
     <marker id="sis-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="470" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="20" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Match the index to the dominant query</text>
   <!-- start -->
   <rect x="380" y="30" width="240" height="54" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -86,6 +87,41 @@ This guide assumes you already understand what you are indexing. Read the [Node-
 ## The decision matrix
 
 The table below is the fast path. Read down the column for your dominant query and the winning family is usually obvious; the sections after it explain the trade-offs when two columns tie.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 272" role="img" aria-labelledby="idx-shape-t idx-shape-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="idx-shape-t">Cell geometry and area behaviour of the three index families</title>
+  <desc id="idx-shape-d">Three panels. An R-tree uses data-derived rectangles that overlap, has no fixed cell area, and answers exact-geometry questions. A quadkey grid uses fixed square tiles that align with slippy-map tiles but whose ground area shrinks toward the poles by the cosine of latitude. H3 uses fixed hexagons with near-uniform ground area and uniform neighbour distance, at the cost of not aligning with any tile scheme.</desc>
+  <rect x="0" y="0" width="880" height="272" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">What each index family does to the shape of a cell</text>
+  <rect x="26" y="52" width="258" height="178" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">R-tree</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Cells: minimum bounding rectangles</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Derived from the data, so they overlap</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Area: whatever the geometry needs</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Exact-geometry joins: yes</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Tile alignment: none</text>
+  <text x="40" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Cross-dataset joinable: no</text>
+  <rect x="310" y="52" width="258" height="178" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Quadkey / grid</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Cells: fixed squares, one per tile</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Aligned with z/x/y slippy tiles</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Area: shrinks as cos(latitude)</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Exact-geometry joins: no</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Tile alignment: exact</text>
+  <text x="324" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Cross-dataset joinable: yes</text>
+  <rect x="594" y="52" width="258" height="178" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">H3 / S2</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Cells: fixed hexagons (H3)</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Global, hierarchical, gap-free</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Area: near-uniform worldwide</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Exact-geometry joins: no</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Tile alignment: none</text>
+  <text x="608" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Cross-dataset joinable: yes</text>
+  <text x="868" y="256" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">A Stockholm quadkey cell covers roughly half the ground area of a Nairobi cell at the same zoom — which is invisible until you compare densities across latitudes.</text>
+</svg>
+<figcaption>The choice is rarely about speed — all three are fast. It is about which distortion you can live with: overlapping cells, latitude-dependent area, or cells that do not line up with your tiles.</figcaption>
+</figure>
 
 | Criterion | R-tree | Quadkey / Grid | H3 | S2 |
 |---|---|---|---|---|
@@ -169,6 +205,37 @@ Picking the resolution number is its own decision — too coarse blurs the signa
 ## Combine them: an R-tree join plus an H3 column
 
 The most common production answer is not one index but two, because exact joins and coarse rollups are genuinely different questions. Carry an R-tree for geometry-correct spatial joins and, on the very same feature rows, materialize an H3 cell id as an ordinary column so aggregation is a plain `GROUP BY`. The R-tree lives in memory or on disk as a tree; the H3 id is just a 64-bit integer that travels with the row into Parquet, PostGIS, or a warehouse, where it costs nothing to filter or roll up.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="idx-combo-t idx-combo-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="idx-combo-t">A table carrying both an R-tree index and a precomputed H3 column</title>
+  <desc id="idx-combo-d">A left-to-right chain. OSM features are loaded into a features table. One branch builds a GiST R-tree index on the geometry column, serving exact spatial joins and point-in-polygon queries. The other branch precomputes an H3 cell identifier column at resolution eight, serving aggregation, tiling and joins to other H3-keyed datasets. Both live on the same row, so neither query path pays for the other.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="combo" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">One table, two access paths — an index and a column, not a choice</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">features table</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">geom · tags · h3_r8</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">one row per feature</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#combo)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">GiST R-tree</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">on geom</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">exact joins, ST_Contains</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#combo)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">h3_r8 column</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">bigint, precomputed</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">GROUP BY, tiling, joins</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#combo)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">query planner</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">picks per predicate</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">no rewrite needed</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Storing the H3 cell costs eight bytes per row and turns a spatial aggregation from an index scan into a hash aggregate.</text>
+</svg>
+<figcaption>These are not competing choices. The R-tree is an index you build; the H3 cell is a column you store. Carrying both costs one integer per row and removes the need to decide up front.</figcaption>
+</figure>
 
 ```python
 import h3

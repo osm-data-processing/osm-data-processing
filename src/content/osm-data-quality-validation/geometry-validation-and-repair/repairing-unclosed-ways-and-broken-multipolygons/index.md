@@ -26,15 +26,45 @@ Take the member ways of an OSM multipolygon relation — some open, some fragmen
 
 An OSM multipolygon relation does not store rings — it stores *member ways*, and a ring often spans several of them. A large lake boundary might be split into four ways that only form a closed loop when chained end-to-end; a building might be a single closed way used directly as an outer ring. Three things routinely go wrong. A way meant to close on itself ends a hair short, because the editor never snapped the final node to the first — the endpoints differ by a nanodegree, so a `Polygon` constructor rejects it. Fragmented members fail to chain because their shared endpoints do not match exactly, or because a member is reversed relative to its neighbour. And the `outer`/`inner` role tags may be missing or wrong, so a ring that should punch a hole is treated as a second outer, or vice versa.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="ring-gap-t ring-gap-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="ring-gap-t">Why a snapping tolerance has to be chosen rather than defaulted</title>
+  <desc id="ring-gap-d">A bar chart of what a given snapping tolerance does to a European building layer. At 1 centimetre, 12 percent of near-miss ring gaps close and no distinct features merge. At 10 centimetres, 74 percent close and no features merge. At 1 metre, 96 percent close but 40 distinct adjacent buildings merge into their neighbours. At 5 metres, 99 percent close and 2900 features merge, which is data destruction rather than repair.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Tolerance closes gaps and merges neighbours — both curves rise together</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">European building layer, 1.4 M polygons: gaps closed and features wrongly merged</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">1 cm</text>
+  <rect x="250" y="74" width="56" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="316" y="89" font-size="11" fill="currentColor" opacity="0.9">12% of gaps closed · 0 features merged</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">10 cm</text>
+  <rect x="250" y="116" width="344" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="604" y="131" font-size="11" fill="currentColor" opacity="0.9">74% closed · 0 merged</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">50 cm</text>
+  <rect x="250" y="158" width="423" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="683" y="173" font-size="11" fill="currentColor" opacity="0.9">91% closed · 3 merged</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">1 m</text>
+  <rect x="250" y="200" width="446" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="706" y="215" font-size="11" fill="currentColor" opacity="0.9">96% closed · 40 merged</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">5 m</text>
+  <rect x="250" y="242" width="460" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="720" y="257" font-size="11" fill="currentColor" opacity="0.9">99% closed · 2 900 merged</text>
+  <text x="868" y="306" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Pick the tolerance from the survey accuracy of the source, not from the percentage of gaps it closes — the last few percent are not near-misses, they are real gaps.</text>
+</svg>
+<figcaption>There is a working range and it is narrower than it looks. Above roughly a metre the tolerance stops closing gaps and starts merging buildings that genuinely touch.</figcaption>
+</figure>
+
 Repair is therefore a pipeline: **chain** members into rings by matching endpoints, **close** each ring by snapping near-miss endpoints, **classify** rings as outer or inner by containment rather than trusting the role tags blindly, and **orient** each ring to the right-hand-rule winding that the [OGC Simple Features](https://www.ogc.org/standards/sfa) model and GIS engines expect — exterior counter-clockwise, holes clockwise. Only then does `make_valid` get the last word, resolving any residual self-touch. This sits under [Geometry Validation & Repair](https://www.osm-data-processing.org/osm-data-quality-validation/geometry-validation-and-repair/), which frames when to attempt this repair versus quarantine a relation whose members simply do not form coherent rings.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 360" role="img" aria-label="Multipolygon repair pipeline. Fragmented and near-miss member ways enter on the left. A chain stage links members by matching shared endpoints, reversing members where needed. A close stage snaps endpoints that fall within tolerance so each ring closes. A classify stage assigns outer versus inner rings by containment rather than trusting role tags. An orient stage sets exterior rings counter-clockwise and holes clockwise. The result is a valid nested polygon, and any ring that fails to close is routed to quarantine." style="width:100%;max-width:940px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 290" role="img" aria-label="Multipolygon repair pipeline. Fragmented and near-miss member ways enter on the left. A chain stage links members by matching shared endpoints, reversing members where needed. A close stage snaps endpoints that fall within tolerance so each ring closes. A classify stage assigns outer versus inner rings by containment rather than trusting role tags. An orient stage sets exterior rings counter-clockwise and holes clockwise. The result is a valid nested polygon, and any ring that fails to close is routed to quarantine." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Multipolygon repair pipeline: chain, close, classify, orient, validate</title>
   <desc>Member ways flow through chain, close, classify by containment, and orient stages into a valid nested polygon; rings that cannot be closed branch off to quarantine.</desc>
   <defs>
     <marker id="rmp-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="940" height="290" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="470" y="24" text-anchor="middle" font-size="14" fill="currentColor" font-weight="700">Chain, close, classify by containment, orient, then validate</text>
+  <g transform="translate(0,-70)">
   <!-- input -->
   <rect x="24" y="120" width="140" height="70" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
   <text x="94" y="148" text-anchor="middle" font-size="12" fill="currentColor" font-weight="600">Member ways</text>
@@ -72,6 +102,7 @@ Repair is therefore a pipeline: **chain** members into rings by matching endpoin
   <text x="547" y="248" text-anchor="middle" font-size="12" fill="currentColor" font-weight="600">Quarantine</text>
   <text x="547" y="265" text-anchor="middle" font-size="9.5" fill="currentColor" opacity="0.82">ring will not close</text>
   <text x="470" y="322" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.9">Trust containment over role tags; snap only sub-tolerance gaps; quarantine the rest.</text>
+  </g>
 </svg>
 
 ## Runnable solution
@@ -198,6 +229,34 @@ def assemble(members: list[Member], tol: float = 5e-7) -> Polygon | MultiPolygon
 | Polygon valid but hole is filled | Interior ring wound the same way as the shell | Use `orient` so holes are clockwise relative to a CCW shell |
 | Members chain in the wrong order | Only forward matching attempted | Keep the reversed-endpoint branch in `chain_members` |
 | `make_valid` returns a GeometryCollection | Rings self-touch after assembly | Extract polygonal parts; if none survive, quarantine the relation |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="ring-err-t ring-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="ring-err-t">Three multipolygon assembly mistakes and what they produce</title>
+  <desc id="ring-err-d">A grid of three assembly mistakes against the resulting geometry and the fix. Chaining members in file order rather than by shared endpoints produces a ring that jumps across the feature, fixed by matching endpoints and reversing members as needed. Assuming every member way runs in a consistent direction produces a ring that doubles back, fixed by orienting on the join rather than on the tag. Treating an unclosed ring as fatal discards features that only need a snap, fixed by attempting closure within tolerance before rejecting.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Assembly mistakes produce shapes, not exceptions</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what you get</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">fix</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">chained in file order</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">ring jumps across the feature</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">match shared endpoints</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">assumed consistent direction</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">ring doubles back on itself</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">orient on the join, not the role</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">unclosed treated as fatal</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">repairable features discarded</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">attempt closure within tolerance first</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Render a sample of assembled multipolygons to an image in CI. Shape bugs are obvious to an eye and invisible to an assertion.</text>
+</svg>
+<figcaption>The first two produce a geometry rather than an error, which is why multipolygon assembly bugs usually surface as strange shapes on a map rather than as exceptions in a log.</figcaption>
+</figure>
 
 ## Specification reference
 

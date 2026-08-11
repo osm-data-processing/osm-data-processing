@@ -29,9 +29,40 @@ Confirm each item before running the code below; a skipped prerequisite is the u
 
 Regional divergence is structural, not accidental: OpenStreetMap stores attributes as a sparse, free-form key-value map on every node, way, and relation, so nothing in the format prevents two communities from coining different values for the same real-world feature. Standardization is therefore a lookup-driven rewrite rather than a schema migration — you resolve each `(key, value)` pair against a canonical table drawn from the [Tag Taxonomy & Key-Value Standards](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/) reference, leaving unrecognized pairs untouched. Because the wider [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) model treats tags as opaque strings, the resolver must be deterministic and idempotent: running it twice on the same input must produce byte-identical output, or downstream diffing breaks.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="tag-harm-t tag-harm-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="tag-harm-t">Four regional spellings of the same concept reduced to one canonical value</title>
+  <desc id="tag-harm-d">A left-to-right chain. Raw regional values for a highway surface — asphalt, Asphalt with a trailing space, bituminous, and blacktop — enter a case and whitespace fold, then a synonym map keyed on the folded form, then a controlled-vocabulary check that either accepts the canonical value asphalt or routes an unmapped value to review. The unmapped branch is logged rather than dropped.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="harm" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four regional spellings, one canonical value — fold before you map</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">raw values</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">asphalt · "Asphalt "</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">bituminous · blacktop</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#harm)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">fold</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">strip + casefold</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">NFKC normalise</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#harm)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">synonym map</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">bituminous → asphalt</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">blacktop → asphalt</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#harm)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">vocabulary check</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">in allowed set?</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">else → review queue</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The review queue is the part teams skip, and it is the only part that tells you which regional spelling you have not met yet.</text>
+</svg>
+<figcaption>The order matters: fold first, then map. Mapping before folding means every synonym needs an entry for each capitalisation, and the table grows combinatorially instead of linearly.</figcaption>
+</figure>
+
 Two refinements separate a production rewrite from a naive `str.replace`. First, multilingual `name:*` tags need a fallback hierarchy so a deduplicated record never loses its only label — if `name` is absent you promote `name:en`, then a configured local-language key. Second, audit obligations under the ODbL require that you never silently destroy source data; preserving the pre-normalization value in a `was:*` or `source:*` namespace keeps the transform reversible and traceable. Heavier value cleaning — case folding, whitespace, regex repair — belongs to [Value Standardization with Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/) and runs as a sibling stage rather than inside this exact-match resolver.
 
-<svg viewBox="0 0 760 410" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow for cross-region tag standardization. Three regional .osm.pbf extracts with divergent values — Region A with surface=cobblestone and only name:de, Region B with surface=sett, Region C with surface=bitumen and only name:fr — all feed a single TagStandardizer resolver. The resolver performs an O(1) alias-table lookup mapping each (key, value) pair to its canonical equivalent, plus a multilingual name fallback ordered name:en then name:de then name:fr, applying exact-match resolution idempotently. It emits one canonical merged extract where surface is unified to sett, missing names are backfilled, and deprecated values are resolved. A separate audit branch writes each original value into a was:* namespace, preserving ODbL provenance so the transform stays reversible." style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 760 410" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow for cross-region tag standardization. Three regional .osm.pbf extracts with divergent values — Region A with surface=cobblestone and only name:de, Region B with surface=sett, Region C with surface=bitumen and only name:fr — all feed a single TagStandardizer resolver. The resolver performs an O(1) alias-table lookup mapping each (key, value) pair to its canonical equivalent, plus a multilingual name fallback ordered name:en then name:de then name:fr, applying exact-match resolution idempotently. It emits one canonical merged extract where surface is unified to sett, missing names are backfilled, and deprecated values are resolved. A separate audit branch writes each original value into a was:* namespace, preserving ODbL provenance so the transform stays reversible." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Standardizing divergent regional OSM tags into one canonical merged extract</title>
   <desc>Three regional PBF extracts using different surface values and name languages feed a TagStandardizer resolver that consults an alias table and a multilingual name fallback. It emits one canonical merged extract while a was:* audit branch preserves each original value for ODbL-compliant, reversible provenance.</desc>
   <defs>
@@ -39,6 +70,7 @@ Two refinements separate a production rewrite from a naive `str.replace`. First,
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="410" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- regional inputs -->
     <text x="104" y="16" font-size="10.5" opacity="0.6">divergent regional extracts</text>
@@ -207,6 +239,38 @@ Confirm the rewrite is correct before merging the standardized extracts:
 | `RuntimeError` on `add_*` | Mutating immutable primitives | Build a new tag dict and use `element.replace(tags=...)`. |
 | Memory climbs on a planet file | Geometry/location index loaded needlessly | Pass `locations=False` (the default) for tag-only rewrites. |
 | Merged dataset still has duplicates | Case/whitespace variance, not aliases | Hand those to a regex cleaning stage before exact-match resolution. |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="tag-region-err-t tag-region-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="tag-region-err-t">Three region-specific normalisation mistakes and the data they damage</title>
+  <desc id="tag-region-err-d">Three panels. Case-folding with the wrong locale: Turkish dotless i means a naive lower-case of a Turkish street name produces a different string, fixed by folding with an invariant locale. Unit assumptions: stripping mph and keeping the number turns 30 mph into 30 km/h, fixed by converting rather than stripping. Transliteration: replacing name tags with an ASCII form loses the authoritative local name, fixed by writing to name:en and leaving name untouched.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three normalisations that are only correct in one region</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Locale-sensitive case</text>
+  <text x="40" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">"İSTANBUL".lower()` in tr_TR</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">yields a dotted i, not "i"</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">String no longer matches the map</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Fix: casefold under an invariant locale</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Never fold under the process locale</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Unit stripping</text>
+  <text x="324" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">maxspeed=30 mph` → `30</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Now read as 30 km/h — 46% slow</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Silently plausible in routing</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Fix: convert to a canonical unit</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Keep the original in a raw column</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Transliteration</text>
+  <text x="608" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">name` overwritten with ASCII</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Authoritative local name lost</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cannot be recovered downstream</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Fix: write `name:en`, keep `name</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Add fields, never replace them</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The pattern behind all three: a normalisation that cannot be undone belongs in a derived column, not in place.</text>
+</svg>
+<figcaption>Each of these is a normalisation that is correct in one region and destructive in another. The safe rule is to add derived fields rather than overwrite the source tag.</figcaption>
+</figure>
 
 ## Specification reference
 

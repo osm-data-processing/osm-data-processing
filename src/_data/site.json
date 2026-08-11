@@ -2,7 +2,7 @@
   "title": "OSM Data Processing & QA Pipelines",
   "shortName": "OSM Pipelines",
   "url": "https://www.osm-data-processing.org",
-  "description": "A technical resource for building, maintaining, and scaling automated OpenStreetMap data pipelines — PBF/XML parsing, tag normalization, topology cleaning, routing graph extraction, update diff sync, validation rules, and Python automation.",
+  "description": "A technical resource for building, maintaining, and scaling automated OpenStreetMap data pipelines \u2014 PBF/XML parsing, tag normalization, topology cleaning, routing graph extraction, update diff sync, validation rules, and Python automation.",
   "author": "OSM Data Processing",
   "lang": "en",
   "themeColor": "#2c6b56",
@@ -12,25 +12,29 @@
       "title": "OSM Data Fundamentals & Architecture",
       "url": "/osm-data-fundamentals-architecture/",
       "icon": "globe",
-      "blurb": "Schema, serialization, spatial indexing, tag taxonomy, and licensing foundations for production-grade OSM pipelines."
+      "blurb": "Schema, serialization, spatial indexing, tag taxonomy, and licensing foundations for production-grade OSM pipelines.",
+      "navLabel": "Fundamentals"
     },
     {
       "title": "Parsing & Tag Normalization Workflows",
       "url": "/parsing-tag-normalization-workflows/",
       "icon": "filter",
-      "blurb": "Async PBF parsing, parser selection, batch attribute mapping, regex-driven value cleaning, error handling, and routing-graph conversion."
+      "blurb": "Async PBF parsing, parser selection, batch attribute mapping, regex-driven value cleaning, error handling, and routing-graph conversion.",
+      "navLabel": "Parsing"
     },
     {
       "title": "OSM Replication & Diff Sync",
       "url": "/osm-replication-diff-sync/",
       "icon": "sync",
-      "blurb": "Keep local extracts current with .osc.gz change files, replication sequence numbers, full-history .osh.pbf, and automated minutely update pipelines."
+      "blurb": "Keep local extracts current with .osc.gz change files, replication sequence numbers, full-history .osh.pbf, and automated minutely update pipelines.",
+      "navLabel": "Replication"
     },
     {
       "title": "OSM Data Quality & Validation",
       "url": "/osm-data-quality-validation/",
       "icon": "shield-check",
-      "blurb": "Author JOSM, Osmose, and Python validation rules; repair geometry; check routing-graph topology and tag consistency across the pipeline."
+      "blurb": "Author JOSM, Osmose, and Python validation rules; repair geometry; check routing-graph topology and tag consistency across the pipeline.",
+      "navLabel": "Quality"
     }
   ],
   "ctas": [

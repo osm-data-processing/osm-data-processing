@@ -14,12 +14,13 @@ date: 2026-07-14
 
 Picture the on-call page nobody wants: a routing product starts sending drivers down a footpath because a contributor retagged a service road, and the defect sailed through ingestion because no rule in your pipeline knew that `highway=footway` should never carry car traffic. The fix is not a heroic patch; it is a validation rule you should have authored months earlier. Authoring rules is the craft at the centre of the [OSM Data Quality & Validation](https://www.osm-data-processing.org/osm-data-quality-validation/) layer — turning "we should check for that" into a durable, testable predicate that runs on every extract. The difficulty is that OSM has three different rule ecosystems, each with its own language and runtime, and teams waste enormous effort porting a check from one to another because they never separated the *intent* of a rule from its *expression*. This guide fixes that by grounding every ecosystem in one portable rule model and giving you a Python engine that runs it at pipeline scale.
 
-<svg viewBox="0 0 1000 344" role="img" aria-labelledby="aov-title aov-desc" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 1000 344" role="img" aria-labelledby="aov-title aov-desc" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title id="aov-title">One unified rule model dispatched across three OSM validation engines</title>
   <desc id="aov-desc">On the left, a unified rule model box lists four slots: selector, predicate, severity, and message. An arrow fans the single model out to three engine boxes on the right: the JOSM validator running MapCSS tests at edit time, the Osmose analyser running the rule DSL on a schedule, and Python rules running pyosmium and geopandas checks inside the pipeline. All three engines converge on a single issue report emitted as normalized findings.</desc>
   <defs>
     <marker id="aov-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="344" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="22" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Author the intent once, express it in three engines</text>
   <!-- rule model -->
   <rect x="28" y="104" width="196" height="150" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -78,6 +79,38 @@ Two design rules apply regardless of engine. The selector must be **cheap and sp
 ## The Three Engines Compared
 
 Each ecosystem occupies a different point in the data's lifecycle, and knowing which to reach for is half of authoring well.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="rule-engines-t rule-engines-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="rule-engines-t">Where JOSM presets, Osmose rules and Python checks each belong</title>
+  <desc id="rule-engines-d">Three panels. JOSM validator presets run inside the editor at edit time, are written in MapCSS, and stop a defect before it is uploaded, but only for mappers who use JOSM. Osmose rules run server-side over an area on a schedule, are written in its rule DSL plus SQL, and produce issues mappers can pick up, but the feedback is hours old. Python checks run inside your own pipeline on your own schema, can express anything, and gate your data specifically, but never reach the upstream map.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three engines, three moments in the life of a defect</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">JOSM preset</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Runs: in the editor, at edit time</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Written in: MapCSS</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Prevents the upload — the only one that does</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Reaches: mappers using JOSM</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Blind to: everything uploaded elsewhere</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Osmose rule</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Runs: server-side, on a schedule</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Written in: rule DSL + SQL</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Produces issues the community fixes</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Reaches: all mappers, upstream</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Blind to: your local schema</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Python check</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Runs: in your pipeline, every batch</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Written in: whatever you need</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Gates your data, not the map</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Reaches: your outputs only</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Blind to: nothing you model</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">A mature setup runs all three and routes findings differently: presets and Osmose upstream, Python checks to quarantine.</text>
+</svg>
+<figcaption>These are not competitors; they occupy three different moments. Only the first prevents the defect, only the third protects your pipeline, and only the second gets it fixed for everyone.</figcaption>
+</figure>
 
 - **JOSM validator (MapCSS).** Runs inside the editor at authoring time, so its rules *prevent* defects before a changeset is ever uploaded. You express checks as MapCSS selectors with `throwError`/`throwWarning` actions, and validator presets constrain the allowed values for a key. This is the right home for rules that a mapper can and should fix on the spot — crossing ways, an unclosed `building`, a nonsensical value. The full authoring workflow is in [Writing Custom JOSM Validation Presets](https://www.osm-data-processing.org/osm-data-quality-validation/authoring-osm-validation-rules/writing-custom-josm-validation-presets/).
 - **Osmose rule DSL.** Runs server-side on a schedule over whole countries, so its rules *surface* the community's standing backlog on a map. Analysers are configured as parameterised checks with stable item and class numbers, per-class severity levels, and localised titles. Because Osmose has been run against the planet for years, its rule catalogue is an inventory of real, recurring defect patterns worth mirroring; [Authoring Osmose Rule DSL Checks](https://www.osm-data-processing.org/osm-data-quality-validation/authoring-osm-validation-rules/authoring-osmose-rule-dsl-checks/) covers its analyser structure and output format.
@@ -269,6 +302,37 @@ Authoring rules has its own failure modes, distinct from the defects the rules d
 ## False-Positive Management
 
 The fastest way to get a validation gate ignored is to let it cry wolf. A rule that fires on legitimate data trains reviewers to dismiss its class entirely, and the one real defect hidden among a hundred false alarms ships. Managing false positives is therefore a first-class authoring task, not an afterthought.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="rule-fp-t rule-fp-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="rule-fp-t">How a rule earns its way from draft to blocking</title>
+  <desc id="rule-fp-d">A left-to-right promotion ladder. A new rule starts in shadow mode, evaluated and counted but with no effect on the pipeline. Once its false-positive rate over a real batch falls below a threshold it moves to warning, flagging objects without stopping them. Once it has held that rate for several batches it moves to error and quarantines. Only rules with a near-zero rate and an unambiguous definition ever become fatal. Each step names the evidence needed to take it.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="rfp" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Promote a rule on evidence, not on confidence</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">shadow</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">counted, no effect</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">measure the FP rate</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#rfp)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">warning</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">flag, do not stop</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">FP rate under 5%</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#rfp)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">error</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">quarantine the object</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">held for 5 batches</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#rfp)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">fatal</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">fail the run</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">near-zero FP, unambiguous</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Demotion needs a path too: a rule whose false-positive rate rises after an upstream tagging change should drop back to warning automatically, not be argued about.</text>
+</svg>
+<figcaption>Rules that go straight to blocking are the reason teams end up disabling validation altogether. Shadow mode costs one boolean and turns rule-writing into something you can iterate on.</figcaption>
+</figure>
 
 Three practices keep the signal high. **Version and test every rule against a golden sample** — a small, hand-verified extract where you know the correct finding count, so a change that inflates false positives is caught before deploy. **Support suppression as data**: some findings are known-and-accepted (a genuinely disconnected private driveway, a valid but unusual tag combination), and a rule engine needs an allow-list keyed on `(type, id, rule_id)` so an acknowledged finding stops re-alerting without weakening the rule for everyone else. **Track the false-positive rate per rule** using reviewer feedback, and retire or tighten any rule whose findings are dismissed more often than actioned. A rule that is wrong more than it is right is worse than no rule, because it consumes attention that a good rule needs.
 

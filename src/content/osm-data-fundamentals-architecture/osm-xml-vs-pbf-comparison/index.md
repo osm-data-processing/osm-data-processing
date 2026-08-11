@@ -3,7 +3,7 @@ pageDescription: "OSM XML (.osm) vs PBF (.osm.pbf): encoding, size, memory profi
 ---
 # OSM XML vs PBF Comparison
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 470" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto" role="img" aria-label="Two OSM ingestion lanes compared. The .osm XML lane is UTF-8 text, 5 to 10 times larger, read with an lxml or SAX stream that calls elem.clear() per record, has a growing element-stack memory profile, and suits ad-hoc QA on small extracts. The .osm.pbf lane is binary Protocol Buffers at baseline size, read one Blob at a time by the osmium C++ core, has a fixed block-buffer memory profile, and suits continental parallel pipelines. Both lanes feed one shared Node, Way and Relation model whose meaning is identical regardless of format.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 470" style="width:100%;max-width:100%;display:block;margin:1.5rem auto" role="img" aria-label="Two OSM ingestion lanes compared. The .osm XML lane is UTF-8 text, 5 to 10 times larger, read with an lxml or SAX stream that calls elem.clear() per record, has a growing element-stack memory profile, and suits ad-hoc QA on small extracts. The .osm.pbf lane is binary Protocol Buffers at baseline size, read one Blob at a time by the osmium C++ core, has a fixed block-buffer memory profile, and suits continental parallel pipelines. Both lanes feed one shared Node, Way and Relation model whose meaning is identical regardless of format.">
   <title>.osm XML vs .osm.pbf: two ingestion lanes, one shared data model</title>
   <desc>A side-by-side comparison. Left lane: the .osm XML format (UTF-8 text, 5 to 10 times larger) is parsed by an lxml.iterparse or SAX stream that calls elem.clear() per record; its memory profile is a growing element stack, and it fits ad-hoc QA and small extracts. Right lane: the .osm.pbf format (binary Protocol Buffers at 1x baseline size) is parsed by the osmium block reader (C++ core) one Blob at a time; its memory profile is a fixed block buffer, and it fits continental, parallel pipelines. Both lanes converge into a single shared Node / Way / Relation model that carries identical meaning regardless of source format.</desc>
   <defs>
@@ -11,6 +11,7 @@ pageDescription: "OSM XML (.osm) vs PBF (.osm.pbf): encoding, size, memory profi
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="470" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="26" text-anchor="middle" font-size="15" font-family="inherit" fill="currentColor" font-weight="700">Two ingestion lanes, one shared data model</text>
   <!-- ===== XML lane (left) ===== -->
   <!-- format -->
@@ -72,6 +73,29 @@ A useful way to reason about the trade-off: text serialization fixes per-record 
 Both formats encode the identical [Node-Way-Relation Data Model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/), so a correctly parsed record is byte-for-byte equivalent in meaning regardless of source. The parsing *strategy*, however, diverges sharply.
 
 XML is consumed with streaming event parsers — `lxml.etree.iterparse`, Python's stdlib `xml.etree.ElementTree`, or a SAX handler — because building a full DOM for anything larger than a city is untenable. The critical discipline is calling `elem.clear()` on each completed primitive so the parser does not retain the entire document as a growing tree. PBF is consumed with binary deserializers — `osmium`/`pyosmium` (C++ core with Python bindings) or `pyrosm` — which decode Protocol Buffer messages directly into compact native structures and hand the application one block at a time. The library survey for picking between them lives in [Async PBF Parsing with pyrosm](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/).
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 860 262" role="img" aria-labelledby="iterparse-mem-t iterparse-mem-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="iterparse-mem-t">Memory growth of XML iterparse with and without element clearing</title>
+  <desc id="iterparse-mem-d">A line chart of resident memory against bytes of OSM XML consumed. Without clearing, iterparse memory climbs linearly past twelve gigabytes as parsed elements are retained. With elem.clear() plus deletion of already-seen siblings, memory stays flat at roughly ninety megabytes for the whole file.</desc>
+  <rect x="0" y="0" width="860" height="262" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">iterparse without clear() is not streaming — it is a slow load</text>
+  <line x1="72" y1="206" x2="836" y2="206" stroke="currentColor" stroke-width="1.2"/>
+  <line x1="72" y1="52" x2="72" y2="206" stroke="currentColor" stroke-width="1.2"/>
+  <text x="62" y="206" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">0</text>
+  <text x="62" y="156" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">4 GB</text>
+  <text x="62" y="106" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">8 GB</text>
+  <text x="62" y="60" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">12 GB</text>
+  <text x="454" y="228" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">bytes of .osm consumed →</text>
+  <path d="M72,204 L836,58" fill="none" stroke="var(--osm-bad,#b91c1c)" stroke-width="2.4"/>
+  <text x="700" y="86" text-anchor="end" font-size="11.5" font-weight="600" fill="currentColor">iterparse, elements retained</text>
+  <path d="M72,201 L836,197" fill="none" stroke="var(--osm-ok,#15803d)" stroke-width="2.4"/>
+  <text x="500" y="192" font-size="11.5" font-weight="600" fill="currentColor">iterparse + elem.clear() + drop earlier siblings</text>
+  <text x="836" y="184" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.85">flat at ~90 MB</text>
+  <text x="430" y="246" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Clearing the element is only half of it: the parent still holds a reference to every sibling already seen, so delete those too.</text>
+</svg>
+<figcaption>The retained-element trace is the single most common reason an XML ingest dies on a file the developer tested on a city extract. Clearing costs one line and turns file size into a non-issue.</figcaption>
+</figure>
 
 The memory-efficient XML pattern is an event loop that yields primitives and aggressively releases each element:
 
@@ -154,6 +178,43 @@ The XML loop is portable and dependency-light but bounded by the GIL and text-pa
 ## Step-by-step: building a format-agnostic ingestion front-end
 
 A production pipeline should not scatter `if format == "xml"` branches through its business logic. The pragmatic pattern is a thin dispatcher that normalizes both formats into one record stream, then validates once downstream.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 860 244" role="img" aria-labelledby="fmt-frontend-t fmt-frontend-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="fmt-frontend-t">A format-agnostic ingestion front-end reducing four file shapes to one record type</title>
+  <desc id="fmt-frontend-d">An input box listing .osm, .osm.bz2, .osm.pbf and .osh.pbf files sniffed by magic bytes feeds two alternative front-ends: an XML front-end using iterparse with element clearing, where tags arrive as child elements, and a PBF front-end using a block reader and string table, where tags arrive as index pairs. Both emit the same normalised record of kind, identifier, tags, references, latitude and longitude, which every later stage consumes without knowing the source format.</desc>
+  <rect x="0" y="0" width="860" height="244" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="xvp" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">One dispatch point, four file shapes, one downstream contract</text>
+  <rect x="26" y="52" width="150" height="150" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="101" y="76" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">input file</text>
+  <text x="101" y="102" text-anchor="middle" font-size="10.5" fill="currentColor" font-family="monospace">.osm</text>
+  <text x="101" y="124" text-anchor="middle" font-size="10.5" fill="currentColor" font-family="monospace">.osm.bz2</text>
+  <text x="101" y="146" text-anchor="middle" font-size="10.5" fill="currentColor" font-family="monospace">.osm.pbf</text>
+  <text x="101" y="168" text-anchor="middle" font-size="10.5" fill="currentColor" font-family="monospace">.osh.pbf</text>
+  <text x="101" y="190" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">sniff magic bytes</text>
+  <line x1="176" y1="127" x2="214" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#xvp)"/>
+  <rect x="216" y="52" width="184" height="66" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="308" y="76" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">XML front-end</text>
+  <text x="308" y="96" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">iterparse + clear()</text>
+  <text x="308" y="111" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">tags arrive as child elements</text>
+  <rect x="216" y="136" width="184" height="66" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="308" y="160" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">PBF front-end</text>
+  <text x="308" y="180" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">block reader + StringTable</text>
+  <text x="308" y="195" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">tags arrive as index pairs</text>
+  <line x1="400" y1="85" x2="452" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#xvp)"/>
+  <line x1="400" y1="169" x2="452" y2="142" stroke="currentColor" stroke-width="1.5" marker-end="url(#xvp)"/>
+  <rect x="454" y="96" width="196" height="62" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="552" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">normalised record</text>
+  <text x="552" y="140" text-anchor="middle" font-size="9.5" fill="currentColor" font-family="monospace">(kind, id, tags, refs, lat, lon)</text>
+  <line x1="650" y1="127" x2="688" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#xvp)"/>
+  <rect x="690" y="96" width="140" height="62" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="760" y="120" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">every later stage</text>
+  <text x="760" y="140" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">format-blind from here</text>
+  <text x="848" y="226" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Only the two shaded boxes know which format they read. Push the difference this far up and no validation, normalisation or export rule needs a format branch.</text>
+</svg>
+<figcaption>The interesting design decision is not which parser is faster; it is how few modules are allowed to know the answer. Two front-ends, one record type, and the rest of the pipeline never branches on file extension again.</figcaption>
+</figure>
 
 1. **Detect the format from the real magic bytes, not the extension.** A `.osm.pbf` always begins with a 4-byte big-endian `BlobHeader` length followed by a protobuf message; an `.osm` file begins with `<?xml` or `<osm`. Sniffing avoids mis-routing a mislabeled mirror.
 
@@ -277,6 +338,10 @@ Default to PBF for every automated workflow, and reserve XML for legacy-system i
 ## Conclusion
 
 The choice between OSM XML and PBF is an engineering trade-off between transparency and throughput. XML buys human readability and straightforward validation at the cost of size, I/O, and unpredictable memory; PBF buys deterministic memory budgeting, block-level parallelism, and an order-of-magnitude smaller footprint at the cost of needing a binary decoder. Contain the decision behind a format-sniffing dispatcher, validate once downstream, and the rest of the pipeline neither knows nor cares which container arrived — which is precisely the property that lets a spatial ETL system scale from a city extract to the planet without a rewrite.
+
+## A note on choosing for archival
+
+Neither format is a good archival choice on its own, because both record a snapshot without recording where it came from. An archived extract needs its replication sequence number and base URL in the header, and PBF is the only one of the two that carries structured header fields at all — an XML file has nowhere to put them except a comment nothing parses. For anything intended to be re-derivable later, that alone decides it.
 
 ## Related
 

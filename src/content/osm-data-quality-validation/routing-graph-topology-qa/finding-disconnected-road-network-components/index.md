@@ -28,11 +28,37 @@ Tick each box before running the code; a missing projection or the wrong compone
 
 A road network loaded as a graph is almost never a single connected whole. Extract clips sever roads at the boundary, a mapper forgets to join a new estate road to the trunk it feeds, and a ferry route or a service road ends up floating with no link to anything. Each of those leaves a **connected component** — a maximal set of nodes mutually reachable within the set — that is separate from the rest. In a healthy network one giant component holds the overwhelming majority of nodes and everything else is a handful of tiny islands; the job here is to measure that distribution and surface the islands.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 282" role="img" aria-labelledby="comp-sizes-t comp-sizes-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="comp-sizes-t">What the component-size distribution of a road network looks like</title>
+  <desc id="comp-sizes-d">A bar chart of connected-component sizes in a country road graph. The largest component holds 98.6 percent of edges and is the real network. A band of components between 50 and 5000 edges holds 0.9 percent and is usually genuinely separate — islands, private estates, pedestrian zones. Components of 2 to 49 edges hold 0.4 percent and are mostly connection bugs. Single-edge components hold 0.1 percent and are almost always tagging errors or stubs.</desc>
+  <rect x="0" y="0" width="880" height="282" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">One giant component and a long tail — the middle band is the interesting part</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">share of road edges by connected-component size, country extract</text>
+  <line x1="250" y1="68" x2="250" y2="228" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">largest component</text>
+  <rect x="250" y="74" width="466" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="726" y="89" font-size="11" fill="currentColor" opacity="0.9">98.6% — the real network</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">50–5 000 edges</text>
+  <rect x="250" y="116" width="6" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="266" y="131" font-size="11" fill="currentColor" opacity="0.9">0.9% — islands, estates, pedestrian zones</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">2–49 edges</text>
+  <rect x="250" y="158" width="6" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="266" y="173" font-size="11" fill="currentColor" opacity="0.9">0.4% — mostly missing junction nodes</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">single edges</text>
+  <rect x="250" y="200" width="6" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="266" y="215" font-size="11" fill="currentColor" opacity="0.9">0.1% — stubs and tagging errors</text>
+  <text x="440" y="264" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Alert on the count of mid-sized components rather than on total component count, which is dominated by harmless single-edge stubs.</text>
+</svg>
+<figcaption>The distribution is the diagnostic. A healthy extract is one enormous component plus a long tail of small ones — and it is the middle band, not the tail, that needs a human to look at it.</figcaption>
+</figure>
+
 Because a road graph is directed, "connected" has two meanings, and the [Routing-Graph Topology QA](https://www.osm-data-processing.org/osm-data-quality-validation/routing-graph-topology-qa/) section leans on the distinction. A **weakly** connected component treats every edge as undirected — it answers "is this cluster of roads attached to the network at all?" A **strongly** connected component honours one-way direction — it answers "can a vehicle actually enter *and* leave following the arrows?" Ranking components by node count turns both questions into a single sorted list: the first entry is your main network, and every entry after it, weighted against the total, is a candidate defect. A weak island means physically severed roads; a small strong island that is *not* weakly isolated means a one-way orientation fault, reachable but inescapable.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 320" role="img" aria-label="A road graph split into components. A large main component of many connected nodes dominates the left. Two small isolated clusters sit apart: a three-node island and a two-node island, both unreachable from the main network. On the right, a size-ranked bar list shows the main component as a long bar and the two islands as short bars flagged for review." style="width:100%;max-width:960px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 320" role="img" aria-label="A road graph split into components. A large main component of many connected nodes dominates the left. Two small isolated clusters sit apart: a three-node island and a two-node island, both unreachable from the main network. On the right, a size-ranked bar list shows the main component as a long bar and the two islands as short bars flagged for review." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Ranking road-network components by size to surface isolated islands</title>
   <desc>Left: a dense main component of connected nodes, plus a separate three-node cluster and a separate two-node cluster that share no edge with it. Right: a horizontal bar chart ranking components by node count, with the main component as a long bar and the two islands as short flagged bars.</desc>
+  <rect x="0" y="0" width="960" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="480" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">One giant component, a few flagged islands</text>
   <!-- main component -->
   <g stroke="currentColor" stroke-width="1.6">
@@ -173,6 +199,37 @@ if __name__ == "__main__":
 4. **Two classes of island** — the driver computes weak islands (physically severed roads) and, separately, small strong components that are not weakly isolated (one-way orientation faults). Reporting them apart tells the reviewer whether to add a missing road or fix a direction tag.
 5. **Actionable geometry** — `island_report` reduces each island to a centroid point with its rank and node count, producing GeoJSON that drops straight onto a map so the reviewer navigates to the defect instead of reading node IDs.
 6. **Deterministic output** — components are sorted by size before writing, so two runs over the same graph produce the same ranked report, which matters when the file is diffed in review.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="comp-triage-t comp-triage-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="comp-triage-t">Triaging a disconnected component to the right outcome</title>
+  <desc id="comp-triage-d">A left-to-right decision chain. For each component below the size threshold, first ask whether any edge is within snapping distance of the main component; if so it is a probable missing junction and goes to repair. If not, ask whether it is reachable only by ferry or is on an island; if so it is legitimately separate and is recorded, not fixed. Otherwise ask whether access tags explain the isolation, such as a private estate; if so it is correct. What remains is genuinely unexplained and goes to manual review.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="ctr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Ask the cheap questions first — most components are answered by the first one</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">near the main component?</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">within snap distance</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">yes → missing junction</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ctr)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">island or ferry-only?</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">coastline / ferry check</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">yes → legitimately separate</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ctr)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">access tags explain it?</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">private, gated, service</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">yes → correct as mapped</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ctr)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">none of the above</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">unexplained</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">manual review queue</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Record the answer per component, keyed on a stable hash of its edge set, so the same island is not re-triaged every week.</text>
+</svg>
+<figcaption>The order matters because each question is cheaper than the next. Proximity is a spatial index query; the island test needs coastline data; the access test needs tag interpretation; and manual review is a person.</figcaption>
+</figure>
 
 ## Verification
 

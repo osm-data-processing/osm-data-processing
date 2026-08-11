@@ -30,9 +30,36 @@ Line these up first; a runner that emits nothing usually means the handler never
 
 A validation framework earns its keep when adding a new check means writing one small object, not editing a monolith. The design here separates three concerns. A **selector** decides whether a rule applies to an element at all — usually a tag test such as "is this `amenity=fuel`?". A **predicate** decides whether an applicable element is *valid* — "does it have a `name`?". A **finding** is what the runner emits when an applicable element fails its predicate, carrying the element's identity, the rule's severity, and a human message. Bundling those into a single `Rule` dataclass makes every check a declarative value you can list, register, and unit-test in isolation, rather than a branch buried in a callback. This is the same separation the editor-time [JOSM validation preset](https://www.osm-data-processing.org/osm-data-quality-validation/authoring-osm-validation-rules/writing-custom-josm-validation-presets/) draws between a selector and its assertion, expressed in Python instead of MapCSS.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 272" role="img" aria-labelledby="pyrule-shape-t pyrule-shape-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="pyrule-shape-t">The interface that makes a Python rule composable</title>
+  <desc id="pyrule-shape-d">Two panels. An ad-hoc check is a function that reads the object, prints or logs when something is wrong, and returns nothing, so it cannot be counted, tested in isolation, promoted or disabled without editing code. A rule object declares an identifier, a severity, an applies-to predicate and a check that yields findings, so the runner can count it, test it against fixtures, promote it through severities and switch it off by configuration.</desc>
+  <rect x="0" y="0" width="880" height="272" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Yield findings, do not log them</text>
+  <rect x="26" y="52" width="401" height="178" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Ad-hoc check</text>
+  <text x="40" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">def check(obj): ...</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Logs or prints on failure</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Returns nothing</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Cannot be counted per rule</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Cannot be disabled without an edit</text>
+  <text x="40" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Cannot be unit-tested in isolation</text>
+  <rect x="453" y="52" width="401" height="178" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Rule object</text>
+  <text x="467" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">id`, `severity`, `applies_to`, `check</text>
+  <text x="467" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Yields Finding(id, obj, detail)</text>
+  <text x="467" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Runner counts, routes and thresholds</text>
+  <text x="467" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Severity changed by configuration</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Disabled by configuration</text>
+  <text x="467" y="209" font-size="10.5" fill="currentColor" opacity="0.92">Tested against a fixture corpus</text>
+  <text x="440" y="256" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The runner then gets everything else for free: shadow mode, per-rule false-positive rates, and a report grouped by rule rather than by log line.</text>
+</svg>
+<figcaption>The difference is not style. A rule that yields findings can be counted, promoted and disabled by a runner; one that logs can only be edited.</figcaption>
+</figure>
+
 The runner is a pyosmium `SimpleHandler`. pyosmium streams a PBF element by element in a single pass — nodes, then ways, then relations — invoking a callback per type, so the whole file is never resident in memory. The runner holds a registry: a list of rules grouped by which element types they care about. For each element the stream delivers, the runner dispatches only the rules whose selector accepts that element, runs each predicate, and yields a finding for every failure. Because dispatch is data-driven off the registry, adding a check is appending a `Rule` to a list; the runner code never changes. That is what makes the framework both extensible and testable — each rule is a pure pair of functions over an element, verifiable without touching a PBF at all. The diagram traces one element through the registry dispatch.
 
-<svg viewBox="0 0 960 340" role="img" aria-label="Registry-driven rule dispatch over a streamed feature. A pyosmium handler streams one element at a time from a PBF. The element enters a rule registry that holds several Rule objects, each pairing a selector with a predicate, a severity, and a message. The registry applies only the rules whose selector accepts the element: a fuel-without-name rule, a highway-without-surface rule, and a deprecated-tag rule are shown. Rules whose selector rejects the element are skipped. For each applicable rule whose predicate fails, the runner yields a finding carrying the element type and id, the severity, and the message. Passing elements yield nothing." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:960px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 960 340" role="img" aria-label="Registry-driven rule dispatch over a streamed feature. A pyosmium handler streams one element at a time from a PBF. The element enters a rule registry that holds several Rule objects, each pairing a selector with a predicate, a severity, and a message. The registry applies only the rules whose selector accepts the element: a fuel-without-name rule, a highway-without-surface rule, and a deprecated-tag rule are shown. Rules whose selector rejects the element are skipped. For each applicable rule whose predicate fails, the runner yields a finding carrying the element type and id, the severity, and the message. Passing elements yield nothing." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Registry-driven rule dispatch over a streamed OSM element</title>
   <desc>A pyosmium handler streams one element at a time into a rule registry of Rule objects; only rules whose selector accepts the element run their predicate, and each failure yields a finding with element id, severity, and message.</desc>
   <defs>
@@ -40,6 +67,7 @@ The runner is a pyosmium `SimpleHandler`. pyosmium streams a PBF element by elem
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="960" height="340" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- PBF stream -->
     <rect x="24" y="130" width="150" height="76" rx="6" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-width="1.5"/>
@@ -227,6 +255,37 @@ if __name__ == "__main__":
 ## Verification
 
 Confirm the framework behaves before trusting its findings:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="pyrule-fixture-t pyrule-fixture-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="pyrule-fixture-t">The fixture corpus a rule needs before it can be trusted</title>
+  <desc id="pyrule-fixture-d">A left-to-right chain of four fixture categories every rule should be tested against. True positives are objects that genuinely have the defect and must be flagged. True negatives are clean objects that must not be flagged. Known-tricky negatives are legitimately unusual objects that naive rules flag, and are the ones that predict the false-positive rate. Regression cases are real objects the rule got wrong once, kept forever so the fix cannot be undone.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="pfx" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four fixture categories — the third is what predicts the false-positive rate</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">true positives</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">really defective</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">must be flagged</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#pfx)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">true negatives</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">plainly clean</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">must not be flagged</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#pfx)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">tricky negatives</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">legitimately unusual</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">naive rules flag these</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#pfx)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">regressions</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">got it wrong once</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">kept forever</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Every false positive a shadow run surfaces should end the day as a tricky negative in the corpus, whether or not the rule changes.</text>
+</svg>
+<figcaption>The third category is the one that distinguishes a rule that works on your test file from one that survives contact with the planet. Collect these from the false positives your shadow run reports.</figcaption>
+</figure>
 
 - **Unit-test a rule with no PBF.** Build an `Element` by hand and assert the rule's outcome, e.g. `Element("node", 1, {"amenity": "fuel"})` should produce a `fuel-without-name` finding while `{"amenity": "fuel", "name": "X"}` should not.
 - **Count against a known extract.** Run `validate` on a small file and compare the finding count for one `code` to a manual `osmium tags-filter` count of the same condition.

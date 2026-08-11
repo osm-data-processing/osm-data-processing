@@ -14,12 +14,13 @@ date: 2026-07-14
 
 A routing engine never complains about bad topology — it just quietly returns "no route found," or worse, an implausible detour, and the mapper who reported the bug gets told the data is fine. That is the trap this guide addresses. When an OSM extract is converted into a routable graph, geometric correctness and *topological* correctness are two different properties: a road can render perfectly on a tile yet be unreachable in the graph because its endpoint sits two centimetres away from the junction it was meant to join. Every one of these defects passes a visual review, passes geometry validation, and still poisons shortest-path queries. This section belongs to the wider [OSM Data Quality & Validation](https://www.osm-data-processing.org/osm-data-quality-validation/) discipline, and it narrows the lens to the connectivity invariants a graph must satisfy before anyone trusts a route computed on it.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 412" role="img" aria-label="A gallery of six routing-graph topology defects. Disconnected component: an isolated subgraph unreachable from the main network. Near-miss endpoints: two ways whose ends stop just short of each other and need snapping to a shared node. One-way trap: a node every one-way arrow enters but none leaves, a sink with no exit. Dangling stub: a degree-one node terminating a road with no through-route. Self-loop: a way whose start and end resolve to the same node. Turn restriction: a junction whose no-turn rule is not modeled in the graph." style="width:100%;max-width:1040px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 412" role="img" aria-label="A gallery of six routing-graph topology defects. Disconnected component: an isolated subgraph unreachable from the main network. Near-miss endpoints: two ways whose ends stop just short of each other and need snapping to a shared node. One-way trap: a node every one-way arrow enters but none leaves, a sink with no exit. Dangling stub: a degree-one node terminating a road with no through-route. Self-loop: a way whose start and end resolve to the same node. Turn restriction: a junction whose no-turn rule is not modeled in the graph." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Six routing-graph topology defects that silently break OSM routing</title>
   <desc>Six labelled panels. Disconnected component shows a main cluster of connected nodes and a separate isolated pair. Near-miss endpoints shows two polylines whose ends stop just short with a gap. One-way trap shows three arrows entering a central node and none leaving. Dangling stub shows a road ending at a free degree-one node. Self-loop shows a node with an edge returning to itself. Turn restriction shows a junction with a crossed-out turn arc.</desc>
   <defs>
     <marker id="rgt-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1040" height="412" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="520" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Six ways a routable graph fails without a geometry error</text>
   <!-- Card A: Disconnected component -->
   <rect x="20" y="40" width="320" height="168" rx="8" fill="none" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -86,6 +87,34 @@ Three foundations make the rest of this guide actionable. First, you need a ment
 ## The Defect Catalogue: What Breaks Routing
 
 Topology QA is a bounded problem because the failure modes are enumerable. Each defect below has a precise graph-theoretic signature, which is what makes it detectable without human review.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="route-defects-t route-defects-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="route-defects-t">Five routing-graph defects ordered by how much of the network each one strands</title>
+  <desc id="route-defects-d">A bar chart of the share of a country road network made unreachable by each defect class, measured against the largest connected component. A missing junction node where two ways cross without sharing a node strands 4.1 percent. A wrongly tagged oneway direction strands 2.3 percent. A barrier node with no access tags strands 1.4 percent. A ferry route with no connecting way strands 0.9 percent. A turn restriction referencing a deleted way strands 0.2 percent.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Share of the network stranded, by defect class</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">nodes unreachable from the largest connected component, country road network</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">crossing without a shared node</text>
+  <rect x="250" y="74" width="404" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="664" y="89" font-size="11" fill="currentColor" opacity="0.9">4.1% stranded · invisible when rendered</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">oneway direction wrong</text>
+  <rect x="250" y="116" width="227" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="487" y="131" font-size="11" fill="currentColor" opacity="0.9">2.3% · reachable one way only</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">barrier node, no access tags</text>
+  <rect x="250" y="158" width="137" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="397" y="173" font-size="11" fill="currentColor" opacity="0.9">1.4% · router assumes impassable</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">ferry with no connecting way</text>
+  <rect x="250" y="200" width="88" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="348" y="215" font-size="11" fill="currentColor" opacity="0.9">0.9% · island components</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">turn restriction → deleted way</text>
+  <rect x="250" y="242" width="20" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="280" y="257" font-size="11" fill="currentColor" opacity="0.9">0.2% · usually just ignored</text>
+  <text x="440" y="306" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Rendered maps and routing graphs disagree precisely here: the first two defects draw perfectly and route not at all.</text>
+</svg>
+<figcaption>The ranking is stable across countries and it is not the ranking most teams check in. Missing junction nodes dominate because a crossing without a shared node is invisible on a rendered map and fatal to a router.</figcaption>
+</figure>
 
 | Defect | Graph signature | Routing symptom |
 |---|---|---|
@@ -194,12 +223,13 @@ def find_near_miss_endpoints(
     return near_miss
 ```
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 300" role="img" aria-label="Connectivity-check pipeline. An OSM extract is converted by osmnx into a MultiDiGraph. The graph fans out to four parallel checks: weak-component ranking that flags small islands, strong-component analysis that flags one-way sinks and islands, a degree scan that flags stubs and self-loops, and a KD-tree range search that flags near-miss endpoints. All four checks converge into a single defect report." style="width:100%;max-width:1080px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 300" role="img" aria-label="Connectivity-check pipeline. An OSM extract is converted by osmnx into a MultiDiGraph. The graph fans out to four parallel checks: weak-component ranking that flags small islands, strong-component analysis that flags one-way sinks and islands, a degree scan that flags stubs and self-loops, and a KD-tree range search that flags near-miss endpoints. All four checks converge into a single defect report." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Connectivity-check pipeline from extract to defect report</title>
   <desc>An OSM extract feeds osmnx graph construction, producing a MultiDiGraph. The graph feeds four parallel analyses — weak connected components, strong connected components, degree scan, and KD-tree near-miss search — which all converge into one consolidated defect report.</desc>
   <defs>
     <marker id="rgtf-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1080" height="300" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="540" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">One graph, four connectivity checks, one report</text>
   <rect x="24" y="120" width="150" height="60" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
   <text x="99" y="146" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="600">OSM extract</text>

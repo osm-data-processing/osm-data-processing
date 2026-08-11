@@ -29,15 +29,45 @@ Check each item; a missing one is the usual reason a "historical" snapshot still
 
 A point-in-time snapshot is a per-object reduction, not a filter over the file as a whole. For each distinct `(type, id)`, walk that object's version chain, keep only versions whose `timestamp` is at or before T, and take the one with the highest `version` number among them. If that surviving version is a deletion — its `visible` flag is `false` — the object did not exist at T and is dropped entirely; otherwise it is emitted in exactly that version. This is the same fold introduced in the [full-history processing](https://www.osm-data-processing.org/osm-replication-diff-sync/full-history-osh-pbf-processing/) overview, applied once per object and then written back out. The reason `version` rather than `timestamp` decides the winner is that timestamps have one-second resolution and two rapid edits can share one, whereas the version counter is strictly monotonic and never ties.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="asof-pitfall-t asof-pitfall-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="asof-pitfall-t">Three ways an as-of query goes wrong and what each produces</title>
+  <desc id="asof-pitfall-d">A grid of three mistakes against the wrong answer each produces. Taking the newest version regardless of the cut-off returns today state, not the requested date. Filtering by timestamp but forgetting the visible flag resurrects deleted objects. Reconstructing a way at the cut-off but resolving its node coordinates from the current snapshot produces a geometry that never existed, mixing 2019 topology with 2026 positions.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three as-of mistakes, three plausible wrong answers</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what the query does</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what you get back</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">ignore the cut-off</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">max(version) per id</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">current state, not historical</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">ignore visible=false</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">newest version ≤ T only</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">deleted objects come back</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">mix eras in one geometry</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">way at T, nodes from today</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">a shape that never existed</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The correct reduction is: newest version at or before T, dropped if that version is invisible, with node positions resolved at the same T.</text>
+</svg>
+<figcaption>The third one is the dangerous one, because it produces a plausible-looking geometry rather than an obvious error. Reconstructing a way as of a date means reconstructing its nodes as of the same date.</figcaption>
+</figure>
+
 The one subtlety beyond that rule is consistency between primitives. A way at T references node ids, and those nodes have their own histories described by the [node, way, and relation data model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/); a faithful snapshot must pair the way version live at T with the node versions live at T, or the geometry will be reconstructed from present-day coordinates. Both approaches below preserve that consistency by selecting the live version of every primitive against the same cutoff.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" role="img" aria-label="Decision flow for reconstructing one object at time T. Start from an object's version chain, discard every version whose timestamp is after T, then take the version with the highest version number among those that remain. If that surviving version has visible equal to false the object is dropped because it was deleted by T; otherwise the object is emitted in that surviving version." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 240" role="img" aria-label="Decision flow for reconstructing one object at time T. Start from an object's version chain, discard every version whose timestamp is after T, then take the version with the highest version number among those that remain. If that surviving version has visible equal to false the object is dropped because it was deleted by T; otherwise the object is emitted in that surviving version." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Per-object reduction: pick the newest visible version at or before T</title>
   <desc>A left-to-right decision flow: the object's version chain enters, versions after T are discarded, the highest remaining version is selected, and a visible check either emits the object or drops it as deleted.</desc>
   <defs>
     <marker id="rpd-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="900" height="240" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="450" y="26" text-anchor="middle" font-size="14.5" fill="currentColor" font-weight="700">One object at T: newest surviving version, then a visible check</text>
+  <g transform="translate(0,-60)">
   <!-- version chain -->
   <rect x="24" y="110" width="150" height="72" rx="7" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
   <text x="99" y="140" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="700">version chain</text>
@@ -72,6 +102,7 @@ The one subtlety beyond that rule is consistency between primitives. A way at T 
   <text x="716" y="204" text-anchor="start" font-size="10" fill="currentColor" opacity="0.85">yes</text>
   <path d="M660,178 Q640,210 620,220" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#rpd-arr)"/>
   <text x="612" y="200" text-anchor="end" font-size="10" fill="currentColor" opacity="0.85">no</text>
+  </g>
 </svg>
 
 ## Runnable solution
@@ -197,6 +228,37 @@ if __name__ == "__main__":
 - **Spot-check a known deletion.** Pick an id you know was deleted before T and confirm it is absent: `osmium getid snapshot.osm.pbf n123456` should return nothing.
 - **Log lines agree.** The `wrote N live objects` line should match `osmium fileinfo` object totals, confirming pass 2 emitted exactly the scanned survivors.
 - **Cross-check the CLI.** Run `osmium time-filter` on the same T and compare object counts; large divergence points to a timezone or tie-breaking bug in the Python fold.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="asof-verify-t asof-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="asof-verify-t">Checks that confirm an as-of reconstruction is genuinely historical</title>
+  <desc id="asof-verify-d">A left-to-right chain of four verification steps. Pick an object with a known edit history and assert its tag set matches the version that was current at the cut-off. Assert that an object deleted before the cut-off is absent from the output. Assert that an object created after the cut-off is also absent. Finally re-run with a cut-off of now and diff against the ordinary snapshot; a non-empty diff means the reduction is wrong somewhere.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="avf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four assertions, ending with the one that catches everything</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">known object at T</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">tags match that version</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">hand-checked once</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#avf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">deleted before T</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">must be absent</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches visible= bugs</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#avf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">created after T</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">must be absent</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches cut-off bugs</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#avf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">reconstruct at now</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">diff vs the snapshot</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">must be empty</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Keep the first three as unit tests with a small fixture file; run the fourth against a city extract in CI.</text>
+</svg>
+<figcaption>The last check is the strongest and the cheapest: reconstructing as of the present must reproduce the snapshot exactly. Any difference is a bug in the reduction, not in the data.</figcaption>
+</figure>
 
 ## Common errors and fixes
 

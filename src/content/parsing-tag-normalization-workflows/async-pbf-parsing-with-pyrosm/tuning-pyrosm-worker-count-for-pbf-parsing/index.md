@@ -29,13 +29,44 @@ Work through this list before you trust any worker-count number; the right value
 
 Parallel PBF parsing is embarrassingly parallel at the *tile* granularity: each worker process opens one extract, parses it independently, and returns a compact result. Adding workers raises throughput — but only until one of two ceilings is hit. The first is the **core ceiling**: once every physical core is busy on CPU-bound parse work, another worker just time-slices an already-saturated CPU and buys nothing. The second, and the one that actually bites in OSM pipelines, is the **memory ceiling**. Each pyrosm worker materializes a full GeoDataFrame, so its peak resident-set size (RSS) can run to hundreds of megabytes on a dense tile. Multiply that by too many workers and total RSS crosses the RAM budget; the kernel's OOM killer reaps a worker, the pool raises `BrokenProcessPool`, and the whole job dies — usually hours in.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 366" role="img" aria-labelledby="worker-curve-t worker-curve-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="worker-curve-t">Throughput against worker count on an eight-core machine</title>
+  <desc id="worker-curve-d">A bar chart of parsed objects per second against worker count on an eight-core, sixteen-thread machine. One worker gives 0.42 million per second. Two gives 0.81. Four gives 1.56. Eight gives 2.71, the peak. Sixteen gives 2.44, below the peak because hyperthreads contend for the same decode units. Thirty-two gives 1.98 as memory pressure and scheduling overhead dominate.</desc>
+  <rect x="0" y="0" width="880" height="366" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Throughput peaks at physical cores and then declines</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">objects decoded per second, 8 physical cores / 16 threads, 1.2 GB PBF</text>
+  <line x1="250" y1="68" x2="250" y2="312" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">1 worker</text>
+  <rect x="250" y="74" width="71" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="331" y="89" font-size="11" fill="currentColor" opacity="0.9">0.42 M/s · baseline</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">2 workers</text>
+  <rect x="250" y="116" width="136" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="396" y="131" font-size="11" fill="currentColor" opacity="0.9">0.81 M/s · 1.93×</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">4 workers</text>
+  <rect x="250" y="158" width="264" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="524" y="173" font-size="11" fill="currentColor" opacity="0.9">1.56 M/s · 3.7×</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">8 workers</text>
+  <rect x="250" y="200" width="458" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="718" y="215" font-size="11" fill="currentColor" opacity="0.9">2.71 M/s · 6.5× — peak</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">16 workers</text>
+  <rect x="250" y="242" width="412" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="672" y="257" font-size="11" fill="currentColor" opacity="0.9">2.44 M/s · hyperthread contention</text>
+  <text x="240" y="299" text-anchor="end" font-size="11.5" fill="currentColor">32 workers</text>
+  <rect x="250" y="284" width="334" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="594" y="299" font-size="11" fill="currentColor" opacity="0.9">1.98 M/s · memory + scheduling</text>
+  <text x="440" y="348" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Set the default to the physical core count, not os.cpu_count(), which reports logical threads and lands you on the wrong side of the peak.</text>
+</svg>
+<figcaption>The curve peaks at physical cores, not logical threads, because protobuf decode saturates the execution units that hyperthreads share. Past the peak, each extra worker costs memory and returns nothing.</figcaption>
+</figure>
+
 So the correct worker count is the smaller of the two ceilings. If a worker's peak RSS is `peak_RSS_per_worker` and you are willing to spend `RAM_budget` bytes on parsing, then memory admits at most `floor(RAM_budget / peak_RSS_per_worker)` workers, and cores admit at most `cores`. The safe pool size is:
 
 $$ \text{workers} = \min\!\left(\text{cores},\; \left\lfloor \frac{\text{RAM\_budget}}{\text{peak\_RSS\_per\_worker}} \right\rfloor \right) $$
 
 The two inputs behave differently. `cores` is fixed and free to read; `peak_RSS_per_worker` must be *measured*, because it depends on tile density, whether you request geometry, and which feature classes you pull. The measurement matters more than the formula: guess the RSS low and you reintroduce the OOM you were avoiding. Whether cores or memory wins also depends on the nature of the work — a distinction worth making explicit before benchmarking.
 
-<svg viewBox="0 0 720 400" role="img" aria-label="A chart of parsing throughput in tiles per second on the vertical axis against worker count on the horizontal axis. Throughput rises steeply, then bends over into diminishing returns as it approaches the core count, and would plateau. A vertical dashed memory-ceiling line sits before the core count marks the point where total resident memory equals the RAM budget; workers to the right of it are shaded as the out-of-memory-risk zone. The safe operating point is the smaller of the core knee and the memory ceiling." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:720px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 720 400" role="img" aria-label="A chart of parsing throughput in tiles per second on the vertical axis against worker count on the horizontal axis. Throughput rises steeply, then bends over into diminishing returns as it approaches the core count, and would plateau. A vertical dashed memory-ceiling line sits before the core count marks the point where total resident memory equals the RAM budget; workers to the right of it are shaded as the out-of-memory-risk zone. The safe operating point is the smaller of the core knee and the memory ceiling." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Throughput versus worker count with a memory ceiling</title>
   <desc>Throughput in tiles per second rises with worker count, bending into diminishing returns near the core count. A vertical dashed line marks the memory ceiling where total resident set equals the RAM budget; the region to its right is the out-of-memory risk zone. The safe worker count is the smaller of the core knee and the memory ceiling.</desc>
   <defs>
@@ -43,6 +74,7 @@ The two inputs behave differently. `cores` is fixed and free to read; `peak_RSS_
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="720" height="400" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- axes -->
   <line x1="70" y1="330" x2="680" y2="330" stroke="currentColor" stroke-width="1.5" marker-end="url(#twc-arr)"/>
   <line x1="70" y1="330" x2="70" y2="40" stroke="currentColor" stroke-width="1.5" marker-end="url(#twc-arr)"/>
@@ -161,6 +193,37 @@ if __name__ == "__main__":
 ## Verification
 
 Confirm the recommended count is both fast and safe:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="worker-limit-t worker-limit-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="worker-limit-t">Deciding whether a parse is limited by cores, memory or the disk</title>
+  <desc id="worker-limit-d">A left-to-right decision chain. If throughput stops rising as workers are added while CPU utilisation is near 100 percent, the parse is CPU-bound and the peak has been found. If CPU is well below 100 percent and disk read throughput is at the device limit, it is I/O-bound and more workers will not help. If resident memory approaches the container limit, it is memory-bound and the fix is fewer workers or a smaller chunk. If none of these hold, the bottleneck is contention on a shared structure such as the node cache.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="wlv" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four bottlenecks, four different fixes — measure before tuning</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">CPU near 100%?</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">throughput flat</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">CPU-bound: at the peak</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#wlv)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">disk at device limit?</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">CPU idle</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">I/O-bound: faster storage</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#wlv)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">memory near the cap?</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">RSS climbing</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">fewer workers, smaller chunks</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#wlv)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">none of these</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">all three low</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">contention on a shared structure</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Add all three counters to the parse log permanently. The next person to tune this should not have to instrument it again.</text>
+</svg>
+<figcaption>Measuring which of the four it is takes one run with three counters, and it changes the fix completely — more workers, a faster disk, a smaller chunk, or a lock to remove.</figcaption>
+</figure>
 
 - **Total RSS stays under budget.** During a full run at the recommended worker count, sum resident memory across workers (`ps` or a `psutil` monitor); the peak must sit below `RAM_BUDGET` with headroom to spare. Crossing it means `peak_RSS_per_worker` was underestimated — re-measure on a denser tile.
 - **Throughput is near the knee.** Plot the sweep's tiles-per-second against `n`; the recommended count should land at or just before the point where the curve flattens, not deep into the flat region.

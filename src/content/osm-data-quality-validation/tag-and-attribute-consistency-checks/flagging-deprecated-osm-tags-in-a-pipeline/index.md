@@ -28,14 +28,47 @@ Confirm each item; a stale map or the wrong match granularity is the usual reaso
 
 OpenStreetMap tagging is a living convention. Over the years the community retires keys and values in favour of clearer successors — a river crossing that was once `highway=ford` is now expressed with `ford=yes` on the crossing node, and various `barrier` sub-values were consolidated into `fence` with a `fence_type`. None of these deprecated tags is *invalid*: a parser reads them fine and a renderer may still draw them. But they drift out of step with the vocabulary that downstream consumers, presets, and analyses expect, so a pipeline that ingests OSM for the long term needs to surface them for migration. This is the deprecation rule class from [Tag & Attribute Consistency Checks](https://www.osm-data-processing.org/osm-data-quality-validation/tag-and-attribute-consistency-checks/), isolated into a runnable pass.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="deprec-kinds-t deprec-kinds-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="deprec-kinds-t">Three kinds of tag deprecation and what a pipeline can do about each</title>
+  <desc id="deprec-kinds-d">Three panels. A one-to-one replacement, such as an old key superseded by a documented new one, can be renamed automatically with full confidence. A one-to-many split, where an old key became several more specific keys, cannot be resolved without additional information and must be flagged with the candidate targets. A discouraged-but-not-replaced tag has no target at all, and the only correct action is to count it and report the trend, because there is nothing to rewrite it to.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Deprecated does not mean renameable</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">One-to-one</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Old key, one documented successor</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Wiki records the mapping</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Semantics unchanged</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Action: rename automatically</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Log the rewrite for audit</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">One-to-many</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Old key split into several</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Target depends on context</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Choosing needs more information</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Action: flag with candidates</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Never pick one and move on</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Discouraged, no successor</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Community advises against it</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Nothing to rewrite it to</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Still present in the data</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Action: count and trend it</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Rewriting would invent meaning</text>
+  <text x="868" y="235" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.85">Source the mapping table from the OSM wiki deprecation list and version it with your code, so a table update is a reviewable change rather than a silent behaviour shift.</text>
+</svg>
+<figcaption>Treating all three as renameable is how pipelines invent data. Only the first has a defined target; the other two need a human or nothing.</figcaption>
+</figure>
+
 The mechanism is a lookup, not a computation. A **deprecation map** keys each retired tag to its modern replacement; the checker asks, for every element, whether any of its tags matches an entry and, if so, records a finding carrying the suggested successor. The only real subtlety is *match granularity*: some deprecations are whole keys (any use of the key is retired), and some are a specific key-value pair (the key is fine but one value is deprecated). Conflating the two either over-reports — flagging every `barrier` when only one value is retired — or under-reports. The reference for which tags are current lives on the OSM Wiki, so the map should be treated as a pinned snapshot of that document rather than a hard-coded constant that silently rots.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" role="img" aria-label="A deprecation lookup pass. An element's tags are matched against a deprecation map with two match kinds: whole-key entries and specific key-value entries. A tag that matches emits a finding carrying the deprecated tag and its suggested replacement into a findings report; a tag with no match passes through untouched." style="width:100%;max-width:960px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 -7 870 249" role="img" aria-label="A deprecation lookup pass. An element's tags are matched against a deprecation map with two match kinds: whole-key entries and specific key-value entries. A tag that matches emits a finding carrying the deprecated tag and its suggested replacement into a findings report; a tag with no match passes through untouched." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Deprecation lookup: match element tags against a map and emit replacements</title>
   <desc>Element tags enter a matcher that consults a deprecation map holding whole-key and key-value entries. Matched tags produce findings with a suggested replacement written to a report; unmatched tags pass through.</desc>
   <defs>
     <marker id="fdt-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="8" y="-7" width="870" height="249" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="480" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Match each tag against the deprecation map</text>
   <!-- element tags -->
   <rect x="24" y="110" width="150" height="88" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -193,6 +226,37 @@ if __name__ == "__main__":
 ## Verification
 
 Confirm the pass behaves before trusting the report:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="deprec-verify-t deprec-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="deprec-verify-t">Checks that a deprecation pass rewrote what it should and nothing else</title>
+  <desc id="deprec-verify-d">A left-to-right chain of four checks after a deprecation pass. No deprecated key from the one-to-one table may remain in the output. No key introduced by the rewrite may itself be deprecated, which happens when a mapping table lags two revisions behind. The rewritten row count must equal the flagged count from the shadow run, proving nothing was rewritten silently. And a sample of rewritten objects must round-trip: applying the mapping to the already-rewritten value must change nothing.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="dvf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four checks — the second one catches a stale mapping table</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">no deprecated keys left</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">from the 1:1 table</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">the obvious check</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#dvf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="9.5" font-weight="600" fill="currentColor">no rewritten key is itself deprecated</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">chase the chain</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">stale table detector</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#dvf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="11.5" font-weight="600" fill="currentColor">rewrites == shadow-run flags</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">counts agree</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">nothing silent</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#dvf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">mapping is idempotent</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">reapply, no change</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">round-trip safe</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Resolve the mapping table transitively when you load it, so a key deprecated twice lands on its final target in one pass instead of needing two.</text>
+</svg>
+<figcaption>The second check catches the failure that a single-pass rewrite cannot see for itself — a table whose target key was itself deprecated in a later revision.</figcaption>
+</figure>
 
 - **Known positive.** Seed a tiny extract or frame with `highway=ford` and confirm exactly one finding appears with `ford=yes` as the replacement.
 - **Value granularity holds.** A `barrier=fence` element must *not* be flagged while `barrier=wire_fence` must be, proving the map keys on the pair, not the bare key.

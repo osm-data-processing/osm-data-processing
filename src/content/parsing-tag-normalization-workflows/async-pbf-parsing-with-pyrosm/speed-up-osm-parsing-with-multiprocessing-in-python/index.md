@@ -27,7 +27,32 @@ date: 2026-06-26
 
 Streaming the binary protobuf is I/O-bound and releases the GIL inside the C extension, but the work that follows — regex tag cleaning, attribute mapping, and geometry checks — is pure-Python and CPU-bound, so threads serialize behind the GIL and buy you nothing. Processes give true parallelism at the cost of pickling data across the IPC boundary, which is why the unit of work here is a *chunk* of elements rather than a single feature. This page is the per-core execution layer beneath [Async PBF Parsing with Pyrosm](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/); where that workflow overlaps disk reads with compute at the file granularity, this one fans the compute itself across cores. The canonical tag targets each worker emits are defined by [Value Standardization & Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/), and when memory rather than CPU is the binding constraint you should reach for the streaming generators in [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) instead of widening the pool.
 
-<svg viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Process-pool data flow for parallel OSM PBF parsing. In the main process, chunk_generator yields lists of element dicts and executor.submit hands one Future per chunk across a spawn-context, pickle-based IPC boundary to a set of worker processes. Each worker runs parse_chunk with automatic GC disabled and calls gc.collect() only at the chunk boundary; after max_tasks_per_child equals 50 tasks a worker is retired and respawned to release its C-extension memory arena. Workers feed an as_completed iterator that drains results out of order and yields a normalized-and-errors payload per chunk." style="width:100%;max-width:720px;display:block;margin:1.5rem auto;font-family:inherit;">
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="gil-shape-t gil-shape-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="gil-shape-t">What the interpreter lock does to a decode workload under threads and processes</title>
+  <desc id="gil-shape-d">Two panels. Four threads decoding protobuf: only one holds the interpreter lock at a time, so throughput stays at roughly one core, context switching adds overhead, and the result is slightly slower than a single thread. Four processes: each has its own interpreter and lock, throughput scales close to linearly, at the cost of pickling data across the boundary and duplicating any shared lookup table into every worker.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Threads share a lock; processes share nothing — including your lookup tables</text>
+  <rect x="26" y="52" width="401" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">4 threads</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">One interpreter lock, held serially</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Throughput: ~1 core, plus switching cost</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Measured: 3% slower than a single thread</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Memory: one copy of everything</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Good for: waiting on I/O, not decoding</text>
+  <rect x="453" y="52" width="401" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">4 processes</text>
+  <text x="467" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Four interpreters, four locks</text>
+  <text x="467" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Throughput: ~3.6× on four cores</text>
+  <text x="467" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cost: pickling across the boundary</text>
+  <text x="467" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Memory: four copies of the tag table</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Good for: decode, normalise, validate</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Send workers block offsets, not blocks: an offset pickles in bytes, and a decoded block pickles in megabytes.</text>
+</svg>
+<figcaption>The trade is memory for parallelism. Four processes decode four times as fast and hold four copies of whatever you forgot to keep out of the worker.</figcaption>
+</figure>
+
+<svg viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Process-pool data flow for parallel OSM PBF parsing. In the main process, chunk_generator yields lists of element dicts and executor.submit hands one Future per chunk across a spawn-context, pickle-based IPC boundary to a set of worker processes. Each worker runs parse_chunk with automatic GC disabled and calls gc.collect() only at the chunk boundary; after max_tasks_per_child equals 50 tasks a worker is retired and respawned to release its C-extension memory arena. Workers feed an as_completed iterator that drains results out of order and yields a normalized-and-errors payload per chunk." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>ProcessPoolExecutor data flow for parallel OSM parsing</title>
   <desc>The main process generates element chunks and submits one Future per chunk across a spawn-context pickle/IPC boundary to N worker processes. Each worker runs parse_chunk with GC disabled, collecting only at the chunk boundary, and is retired and respawned after max_tasks_per_child=50 tasks to free C-extension memory. Workers feed an as_completed iterator that drains results out of order and yields a {normalized, errors} payload per chunk.</desc>
   <defs>
@@ -35,6 +60,7 @@ Streaming the binary protobuf is I/O-bound and releases the GIL inside the C ext
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="720" height="420" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- Main process container -->
     <rect x="8" y="96" width="196" height="190" rx="7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.85"/>
@@ -212,6 +238,37 @@ def normalize_tags(tags: dict) -> dict:
 ## Verification
 
 Confirm the pool is genuinely parallel and bounded:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="mp-verify-t mp-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="mp-verify-t">Proving a parallel parse produced the same result as a serial one</title>
+  <desc id="mp-verify-d">A left-to-right chain of four equivalence checks. Object counts by type must match the serial run exactly. A checksum over sorted object identifiers must match, catching duplicated or dropped blocks. A checksum over sorted normalised output rows must match, catching per-worker state leaking between objects. And a run with a different worker count must produce the same checksums, proving the result does not depend on the partitioning.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="mpv" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four equivalence checks, ending with the one that catches shared state</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">counts by type</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">vs the serial run</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches lost blocks</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#mpv)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">checksum of sorted ids</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">order-independent</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches duplicates</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#mpv)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">checksum of output rows</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">sorted, normalised</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches state leaks</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#mpv)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">re-run at N=1, 4, 16</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">same checksums</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">proves independence</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Sort before checksumming. Parallel output arrives in whatever order the workers finish, and that order is not a defect.</text>
+</svg>
+<figcaption>The last check is the one that catches the subtle bug class: any result that changes when you change the worker count is carrying state it should not.</figcaption>
+</figure>
 
 - **Distinct PIDs.** Aggregate `worker_pid` across returned `normalized` records — you should see close to `max_workers` distinct PIDs, and they should *change* over the run as `max_tasks_per_child` recycles them.
 - **CPU saturation.** `htop` (or `psutil.cpu_percent(percpu=True)`) should show all worker cores near 100% during the CPU-bound phase, not one core pinned while the rest idle.

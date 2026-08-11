@@ -28,6 +28,37 @@ Confirm each item before running the code; a wrong resolution or an out-of-date 
 
 H3 is a hierarchy of sixteen resolutions, 0 (coarsest) through 15 (finest), and each step subdivides every parent cell into roughly seven children. That factor of seven is the whole decision: moving one resolution finer divides the average cell area by about seven and multiplies the number of occupied cells accordingly. Choosing a resolution is therefore a balance between three quantities that move together — cell **area** (how much ground each hexagon covers), cell **count** (how many hexagons your points spread across), and **statistical stability** (how many points land in a typical cell). Aggregate at too coarse a resolution and every cell is stable but spatially meaningless; aggregate too fine and each cell is spatially precise but statistically noisy because its count is zero, one, or two. The parent [Spatial Index Selection](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-index-selection-rtree-h3-quadkey/) guide explains why hexagons beat a planar grid for this — their near-uniform area keeps counts comparable across latitudes — but it leaves open which of the sixteen resolutions to actually use.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 366" role="img" aria-labelledby="h3-ladder-t h3-ladder-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="h3-ladder-t">Average H3 cell edge length and cell count by resolution</title>
+  <desc id="h3-ladder-d">A bar chart of average hexagon edge length in metres for H3 resolutions six through eleven: 3230 metres, 1220, 461, 174, 65.9 and 24.9. Each row also gives the number of cells needed to tile Greater London, rising from 92 at resolution six to about 15.5 million at resolution eleven.</desc>
+  <rect x="0" y="0" width="880" height="366" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">One step of H3 resolution costs seven times the cells</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">average hexagon edge length, and cells needed to cover Greater London (1 572 km²)</text>
+  <line x1="250" y1="68" x2="250" y2="312" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">r6</text>
+  <rect x="250" y="74" width="470" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="730" y="89" font-size="11" fill="currentColor" opacity="0.9">3 230 m edge · 92 cells</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">r7</text>
+  <rect x="250" y="116" width="178" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="438" y="131" font-size="11" fill="currentColor" opacity="0.9">1 220 m edge · 640 cells</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">r8</text>
+  <rect x="250" y="158" width="67" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="327" y="173" font-size="11" fill="currentColor" opacity="0.9">461 m edge · 4 500 cells</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">r9</text>
+  <rect x="250" y="200" width="25" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="285" y="215" font-size="11" fill="currentColor" opacity="0.9">174 m edge · 31 000 cells</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">r10</text>
+  <rect x="250" y="242" width="10" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="270" y="257" font-size="11" fill="currentColor" opacity="0.9">65.9 m edge · 2.2 M cells</text>
+  <text x="240" y="299" text-anchor="end" font-size="11.5" fill="currentColor">r11</text>
+  <rect x="250" y="284" width="6" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="266" y="299" font-size="11" fill="currentColor" opacity="0.9">24.9 m edge · 15.5 M cells</text>
+  <text x="440" y="348" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Bar length is edge length. Choose the coarsest resolution at which the smallest feature you care about still lands in its own cell.</text>
+</svg>
+<figcaption>Each step up the ladder divides edge length by roughly 2.6 and multiplies cell count by seven. Two steps too fine and an aggregation that fitted in memory no longer does.</figcaption>
+</figure>
+
 The average area shrinks geometrically with resolution, and the average edge length shrinks with its square root:
 
 $$
@@ -36,12 +67,13 @@ $$
 
 where $A_0 \approx 4.36 \times 10^{6}\ \text{km}^2$ is the average hexagon area at resolution 0 and $e_0 \approx 1108\ \text{km}$ its average edge length. In practical terms this puts resolution 6 near $36\ \text{km}^2$ per cell (neighbourhood-scale), resolution 8 near $0.74\ \text{km}^2$ (a few city blocks), and resolution 10 near $15{,}000\ \text{m}^2$ (a single block). A useful rule of thumb is to target a resolution where the typical occupied cell holds enough points to be stable — often a dozen or more — while cells still resolve the spatial variation you care about.
 
-<svg viewBox="0 0 1000 360" role="img" aria-label="The H3 resolution trade-off for aggregating OSM points. On the left, a single coarse hexagon at resolution 6 contains all the scattered points and reports one large, statistically stable count of 412, but blurs local variation. On the right, the same points fall into a flower of seven finer hexagons at resolution 9, resolving spatial detail but leaving several cells with sparse counts including zeros." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 1000 360" role="img" aria-label="The H3 resolution trade-off for aggregating OSM points. On the left, a single coarse hexagon at resolution 6 contains all the scattered points and reports one large, statistically stable count of 412, but blurs local variation. On the right, the same points fall into a flower of seven finer hexagons at resolution 9, resolving spatial detail but leaving several cells with sparse counts including zeros." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Coarse versus fine H3 resolution when aggregating OSM points</title>
   <desc>Left panel: one large hexagon at resolution 6 holding many scattered points, labelled as one cell with a stable count of 412 but blurring local detail. Right panel: the same points aggregated at resolution 9 into a flower of seven small hexagons carrying small, sparse counts including a zero, resolving detail at the cost of statistical stability. A central arrow marks increasing resolution.</desc>
   <defs>
     <marker id="h3res-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="360" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">One resolution step = ~7× the cells, ~1/7 the count</text>
   <!-- Left: coarse -->
   <text x="230" y="58" text-anchor="middle" font-size="13" fill="currentColor" font-weight="700">Coarse — resolution 6</text>
@@ -173,6 +205,31 @@ if __name__ == "__main__":
 ## Verification
 
 Confirm the aggregation is sound before trusting a density map built on it:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="h3-err-t h3-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="h3-err-t">Two failure shapes from choosing the wrong H3 resolution</title>
+  <desc id="h3-err-d">Two panels. Too coarse: distinct neighbourhoods merge into one cell, the density map flattens, hot spots vanish, and no later query can recover the detail because it was destroyed at aggregation time. Too fine: most cells hold zero or one point, the map reads as noise, storage and shuffle cost rise sharply, and the result is recoverable by rolling cells up to a parent.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Both wrong resolutions look plausible on the map — only one is recoverable</text>
+  <rect x="26" y="52" width="401" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Too coarse (r6 for street-level counts)</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Distinct neighbourhoods share one cell</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Density surface flattens; peaks disappear</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cell count small, query fast</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Signal destroyed at aggregation time</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Recoverable later? No — re-aggregate from raw</text>
+  <rect x="453" y="52" width="401" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Too fine (r11 for city-level counts)</text>
+  <text x="467" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Most cells hold 0 or 1 point</text>
+  <text x="467" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Map reads as speckle, not structure</text>
+  <text x="467" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cell count large, shuffle and storage costly</text>
+  <text x="467" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Signal intact, just spread thin</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Recoverable later? Yes — h3_to_parent()</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">When the right resolution is genuinely unclear, aggregate one step finer than you think you need and roll up on read.</text>
+</svg>
+<figcaption>Only one of these mistakes is reversible. Aggregating too coarsely throws information away permanently; aggregating too finely only costs money, and <code>h3_to_parent</code> undoes it.</figcaption>
+</figure>
 
 - **Counts conserve.** `sum(counts.values())` must equal `len(points)` — every POI lands in exactly one cell, so a mismatch means points were dropped or double-counted.
 - **The sweep is monotonic.** In the log, occupied-cell count must rise and median-per-cell must fall as resolution increases; if it does not, the input coordinates are likely swapped or clustered on one point.

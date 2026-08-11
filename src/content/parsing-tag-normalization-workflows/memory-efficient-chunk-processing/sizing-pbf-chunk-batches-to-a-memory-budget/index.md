@@ -29,6 +29,37 @@ Check these before trusting the sizing math; an unmeasured `bytes_per_element` i
 
 Every streaming OSM job that flushes fixed-size batches has one dial that decides whether it survives a dense extract: how many rows it lets accumulate before spilling. Pick it too small and you drown in per-flush overhead and tiny row groups; too large and the buffer plus its transient copy blow past the RAM ceiling and the kernel OOM-killer ends the run. The mistake is treating that dial as a constant to be guessed, when it is really the output of a short calculation. If you know how many bytes one buffered element actually occupies, and how many bytes you are permitted to spend, the safe batch size follows directly. This is the same budgeting instinct that the parent [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) guide applies to the buffer as a whole — here it is made explicit and measured per element.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 366" role="img" aria-labelledby="budget-split-t budget-split-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="budget-split-t">Where a container memory budget actually goes</title>
+  <desc id="budget-split-d">A bar chart apportioning an 8 gigabyte container budget for a chunked OSM job. The interpreter and imported libraries take 320 megabytes before any data is read. The node cache takes 2.4 gigabytes. The in-flight chunk and its derived columns take 1.8 gigabytes. The output writer buffer takes 900 megabytes. Allocator fragmentation and headroom take 1.6 gigabytes. That leaves roughly 1 gigabyte unallocated, which is the safety margin.</desc>
+  <rect x="0" y="0" width="880" height="366" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">An 8 GB budget, apportioned honestly</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">components of peak resident memory for a chunked normalise-and-write job</text>
+  <line x1="250" y1="68" x2="250" y2="312" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">interpreter + libraries</text>
+  <rect x="250" y="74" width="56" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="316" y="89" font-size="11" fill="currentColor" opacity="0.9">320 MB · before reading a byte</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">node cache</text>
+  <rect x="250" y="116" width="417" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="677" y="131" font-size="11" fill="currentColor" opacity="0.9">2.4 GB · sized from the hit-rate curve</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">in-flight chunk + derived cols</text>
+  <rect x="250" y="158" width="312" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="572" y="173" font-size="11" fill="currentColor" opacity="0.9">1.8 GB · this is what chunk size controls</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">writer buffer</text>
+  <rect x="250" y="200" width="156" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="416" y="215" font-size="11" fill="currentColor" opacity="0.9">900 MB · row-group sized</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">fragmentation + headroom</text>
+  <rect x="250" y="242" width="278" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="538" y="257" font-size="11" fill="currentColor" opacity="0.9">1.6 GB · the line people forget</text>
+  <text x="240" y="299" text-anchor="end" font-size="11.5" fill="currentColor">unallocated margin</text>
+  <rect x="250" y="284" width="170" height="21" rx="3" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.3"/>
+  <text x="430" y="299" font-size="11" fill="currentColor" opacity="0.9">980 MB · what absorbs a bad chunk</text>
+  <text x="868" y="348" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Only one of these six rows is set by chunk size. Sizing chunks without accounting for the other five is why a job tuned on a laptop is killed in a container.</text>
+</svg>
+<figcaption>The line most sizing calculations omit is fragmentation. Python and Arrow both return memory to the allocator rather than the kernel, so resident memory sits well above live-object size.</figcaption>
+</figure>
+
 The width of an OSM row is dominated by its tag payload, and tags are contributor-defined free text, so the *only* reliable per-element figure is a measured one. `DataFrame.memory_usage(deep=True)` walks the actual Python objects behind each column — including the variable-length strings a shallow measurement misses — and dividing its total by the row count gives a faithful bytes-per-element for your real data rather than a schema guess. Reserve a fixed `overhead` for the interpreter, imported libraries, and any long-lived caches (the location store, for instance), and the batch size is a floor division:
 
 $$
@@ -37,12 +68,13 @@ $$
 
 where $B_{\text{budget}}$ is the RAM you can spend, $B_{\text{overhead}}$ is the fixed resident floor, and $\bar{w}_{\text{element}}$ is the measured deep bytes per row. Because a flush briefly holds the buffer and its serialized copy at once, divide the numerator by a small safety factor (or the measured peak-to-buffer ratio) so the transient copy still fits. A static number computed this way is correct only for the data you measured, though — tag density drifts between rural and urban tiles — so pair it with a runtime [`psutil`](https://psutil.readthedocs.io/en/latest/) guard that samples RSS and shrinks the next batch when the process creeps toward the ceiling. The static formula sets the starting point; the adaptive feedback keeps a mis-measurement from becoming a crash.
 
-<svg viewBox="0 0 800 300" role="img" aria-label="A memory budget in bytes and a measured deep bytes-per-element figure both feed a floor-division that yields the chunk size in rows. The chunk size drives batch accumulation and flush. A psutil RSS sample of the running process feeds an adaptive feedback arrow back to the chunk size, shrinking it when resident memory approaches the ceiling." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 800 300" role="img" aria-label="A memory budget in bytes and a measured deep bytes-per-element figure both feed a floor-division that yields the chunk size in rows. The chunk size drives batch accumulation and flush. A psutil RSS sample of the running process feeds an adaptive feedback arrow back to the chunk size, shrinking it when resident memory approaches the ceiling." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>From RAM budget and measured element width to an adaptive chunk size</title>
   <desc>A RAM budget box and a measured bytes-per-element box both feed a floor-division node that outputs chunk size in rows. Chunk size drives a batch-accumulate-and-flush stage. A psutil RSS sample of the process forms an adaptive feedback loop back to chunk size, shrinking it when resident memory nears the ceiling.</desc>
   <defs>
     <marker id="szArr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="800" height="300" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="400" y="24" text-anchor="middle" font-size="14" fill="currentColor" font-weight="700">Compute the batch size, then let RSS correct it</text>
   <!-- budget box -->
   <rect x="24" y="52" width="176" height="58" rx="6" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-width="1.5"/>
@@ -225,6 +257,34 @@ Prove the size is safe before committing it to a long run:
 | Batch never flushes | `should_flush` compared against a stale target | Call `note_after_flush` each cycle so the target updates. |
 | Guard shrinks to 1 and stalls | RSS ceiling set below the true resident floor | Raise the budget above measured overhead plus one batch. |
 | `psutil.AccessDenied` on RSS read | Sandboxed process without self-inspect rights | Fall back to the static size; skip the runtime guard. |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="budget-err-t budget-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="budget-err-t">Three sizing mistakes that pass testing and fail in production</title>
+  <desc id="budget-err-d">A grid of three mistakes with symptom and fix. Sizing from average object size ignores that a chunk of relations is far heavier than a chunk of nodes, fixed by sizing from the worst observed chunk. Measuring memory with sys.getsizeof misses the object graph and reports a fraction of the truth, fixed by measuring resident set size. Testing on a city extract that never exercises the node cache means the largest consumer is absent from the measurement, fixed by testing on an extract large enough for the cache to fill.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three under-estimates that grow with the input</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what goes wrong in production</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">fix</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">sized from average object size</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">a relation-heavy chunk OOMs</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">size from the worst observed chunk</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">measured with sys.getsizeof</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">real usage 4–10× the estimate</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">measure RSS, not object size</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">tested on a city extract</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">node cache never filled in the test</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">test on a country extract</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Log peak RSS at the end of every run. It costs one line and turns sizing from a calculation into a measurement.</text>
+</svg>
+<figcaption>All three under-estimate, and all three under-estimate by more the larger the real input is — which is exactly backwards from what you want a sizing calculation to do.</figcaption>
+</figure>
 
 ## Specification reference
 

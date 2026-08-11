@@ -27,15 +27,45 @@ You have an `.osm.pbf` that was current three weeks ago and needs to reach today
 
 A replication stream is an append-only sequence of numbered diffs, and "catching up" is nothing more than replaying the contiguous run of diffs between where your file stands and the stream's current head. The one non-obvious part is *finding the starting point*. Your extract knows a timestamp, but diffs are addressed by integer sequence, so you need a timestamp-to-sequence lookup. pyosmium's `ReplicationServer.timestamp_to_sequence` does exactly that: it binary-searches the stream's `state.txt` files to find the sequence whose completeness time brackets your timestamp. Once you hold that starting sequence, `apply_diffs` streams every subsequent change through libosmium's version-aware merge — the same create/modify/delete semantics detailed in the parent guide, [Applying .osc Change Files with osmium](https://www.osm-data-processing.org/osm-replication-diff-sync/applying-osc-change-files-with-osmium/) — and reports the sequence it reached.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="catchup-cost-t catchup-cost-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="catchup-cost-t">Catch-up cost against how stale the extract is</title>
+  <desc id="catchup-cost-d">A bar chart of minutes to catch up a country extract from the minutely stream, by staleness. One hour behind is 60 diffs and about 40 seconds. One day is 1440 diffs and about 16 minutes. One week is 10 080 diffs and about 1.9 hours. One month is 43 200 diffs and about 8 hours, at which point re-downloading a fresh 1.2 GB extract takes 4 minutes and is strictly faster.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Past about ten days, re-downloading beats replaying</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">wall-clock minutes to bring a 1.2 GB country extract current from the minutely stream</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">1 hour behind</text>
+  <rect x="250" y="74" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="89" font-size="11" fill="currentColor" opacity="0.9">60 diffs · 42 s</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">1 day behind</text>
+  <rect x="250" y="116" width="16" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="276" y="131" font-size="11" fill="currentColor" opacity="0.9">1 440 diffs · 16 min</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">1 week behind</text>
+  <rect x="250" y="158" width="112" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="372" y="173" font-size="11" fill="currentColor" opacity="0.9">10 080 diffs · 1.9 h</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">1 month behind</text>
+  <rect x="250" y="200" width="470" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="730" y="215" font-size="11" fill="currentColor" opacity="0.9">43 200 diffs · 8 h</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">fresh download instead</text>
+  <rect x="250" y="242" width="6" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="266" y="257" font-size="11" fill="currentColor" opacity="0.9">1.2 GB over HTTPS · 4 min</text>
+  <text x="868" y="306" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Compute the crossover for your own link speed once and encode it as a threshold in the catch-up script, so the decision is not made under pressure at 03:00.</text>
+</svg>
+<figcaption>There is a crossover, and it is worth computing rather than guessing. Past roughly ten days of staleness the fresh download wins on every axis — time, bandwidth and the risk of hitting a diff that has aged out.</figcaption>
+</figure>
+
 The critical choice is *cadence for the catch-up itself*. A three-week gap on the minutely stream is roughly 30,000 tiny files; on the hourly stream it is a few hundred; on the daily stream a few dozen. Use the coarsest stream that still lands you close enough to live, catch up on that, then switch to your steady-state stream for ongoing tracking. This is why the diagram below frames catch-up as a bounded loop over a *sequence gap*, not an open-ended poll.
 
-<svg viewBox="0 0 960 300" role="img" aria-label="Catch-up loop over a replication sequence gap. The stale extract sits at a start sequence derived from its timestamp. A loop fetches the diff at the current sequence, applies it to the working file, and increments the sequence, repeating until it reaches the stream head sequence. When the head is reached the file is current and the loop exits." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:960px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="8 -3 844 195" role="img" aria-label="Catch-up loop over a replication sequence gap. The stale extract sits at a start sequence derived from its timestamp. A loop fetches the diff at the current sequence, applies it to the working file, and increments the sequence, repeating until it reaches the stream head sequence. When the head is reached the file is current and the loop exits." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Catch-up loop closing the gap between a stale sequence and the stream head</title>
   <desc>The stale extract's timestamp maps to a start sequence. A loop fetches the diff at the current sequence, applies it, increments, and repeats until the head sequence is reached, at which point the extract is current.</desc>
   <defs>
     <marker id="catchup-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="8" y="-3" width="844" height="195" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="480" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Replay the contiguous gap, one sequence at a time</text>
+  <g transform="translate(0,-70)">
   <!-- start -->
   <rect x="24" y="120" width="160" height="66" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
   <text x="104" y="148" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">Stale extract</text>
@@ -58,6 +88,7 @@ The critical choice is *cadence for the catch-up itself*. A three-week gap on th
   <!-- loop back: no -->
   <path d="M756,186 V246 H323 V188" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#catchup-arrow)"/>
   <text x="540" y="240" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">no → next sequence</text>
+  </g>
 </svg>
 
 ## Runnable solution
@@ -151,6 +182,37 @@ osmium apply-changes stale.osm.pbf catchup.osc.gz \
 4. **Bound the batch.** `max_size` caps how far one call advances, so a very large gap is processed in bounded chunks instead of one unbounded download; call `catch_up` in a loop until `reached` stops advancing to finish a huge gap.
 5. **Close in order.** The `SimpleWriter` is closed before the server so the output file is flushed completely, and the server connection is released in the outer `finally`.
 6. **Record the anchor.** The returned sequence becomes your steady-state starting point — persist it exactly as [Replication Sequence Numbers and State](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/) describes.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="catchup-loop-t catchup-loop-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="catchup-loop-t">The four states of a catch-up loop and the transition each one takes</title>
+  <desc id="catchup-loop-d">A left-to-right chain of loop states. Read the local sequence from the checkpoint. Compare it against the stream head from state.txt. If behind, fetch and apply the next diff, then write the new checkpoint before looping. When the local sequence equals the head, the extract is current and the loop exits. The checkpoint write is placed after the apply and before the loop, which is what makes a crash resumable rather than corrupting.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="cul" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Apply, then checkpoint — a crash between them must lose work, never invent it</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">read checkpoint</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">local seq S</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">from disk, not memory</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#cul)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">read stream head</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">state.txt → seq H</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">one HTTP GET</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#cul)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">apply diff S+1</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">to the working file</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">atomic rename on success</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#cul)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">write checkpoint</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">S := S+1</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">fsync before looping</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">A crash after the apply and before the checkpoint replays one diff. Because application is idempotent by version, replaying one is free; skipping one is not.</text>
+</svg>
+<figcaption>The ordering inside the loop is the entire correctness argument: apply, then checkpoint. Reverse those two and a crash between them leaves a checkpoint claiming work that was never done.</figcaption>
+</figure>
 
 ## Verification
 

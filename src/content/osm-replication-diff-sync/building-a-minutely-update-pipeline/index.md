@@ -14,12 +14,13 @@ date: 2026-07-14
 
 A single applied diff is a manual operation; keeping an extract current for months without a human touching it is a systems problem. Picture an analytics database that a team believes is live: a cron entry fetches the newest OsmChange file every minute and applies it, and for weeks the map looks fresh. Then the host reboots mid-apply, the process dies after the merge but before anyone records that the diff was consumed, and the next run re-applies the same sequence — double-deleting a node that a later diff had already recreated. Nobody notices until a routing query returns a road that upstream restored two hours ago. The dataset is now silently forked from the planet, and no error was ever raised. That failure is the reason a minutely pipeline is not a loop around `osmium apply-changes` but a small state machine with a durable memory of exactly what it has already done. This guide sits inside the [OSM Replication & Diff Sync](https://www.osm-data-processing.org/osm-replication-diff-sync/) section, which explains why an extract drifts from upstream in the first place; here the concern narrows to automating the catch-up forever, safely.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 384" role="img" aria-label="The durable minutely update loop. A scheduler timer tick triggers fetch of the next replication diff, which is applied to the base extract with osmium, then only the touched features are re-indexed, and finally the last-applied sequence checkpoint is advanced atomically before a success notification fires and the loop waits for the next tick. If fetching or applying a diff raises an upstream error, control branches to an exponential back-off and retry that returns to the fetch step without advancing the checkpoint." style="width:100%;max-width:1080px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 384" role="img" aria-label="The durable minutely update loop. A scheduler timer tick triggers fetch of the next replication diff, which is applied to the base extract with osmium, then only the touched features are re-indexed, and finally the last-applied sequence checkpoint is advanced atomically before a success notification fires and the loop waits for the next tick. If fetching or applying a diff raises an upstream error, control branches to an exponential back-off and retry that returns to the fetch step without advancing the checkpoint." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Crash-safe fetch, apply, re-index, and advance-checkpoint update loop</title>
   <desc>A scheduler tick starts a cycle: fetch the next diff, apply changes with osmium, re-index only the touched features, then advance the durable checkpoint atomically and notify success before waiting for the next tick. Fetch or apply errors branch to an exponential back-off and retry that loops back to fetch and never advances the checkpoint.</desc>
   <defs>
     <marker id="mup-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1080" height="384" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="540" y="26" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Apply first, advance the checkpoint last — the loop is crash-safe by ordering</text>
   <!-- top row -->
   <rect x="24" y="64" width="168" height="62" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -67,6 +68,48 @@ This guide composes three capabilities that each have their own reference. You n
 ## The Checkpoint: The Only State That Must Survive a Crash
 
 Everything in a minutely pipeline is derived except one number. The **checkpoint** is the sequence number of the last replication diff that has been fully applied to the base extract *and* had its side effects (re-indexing, downstream fan-out) completed. It is the pipeline's single source of truth about where it is in the stream, and its integrity is the whole game: if the checkpoint is ahead of reality, you skip diffs and silently lose edits; if it is behind reality, you re-apply diffs and corrupt state. The correctness of the loop reduces to one invariant — the checkpoint advances if and only if the diff it names has been applied exactly once.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="ckpt-store-t ckpt-store-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="ckpt-store-t">Four checkpoint stores compared on the guarantee each one actually gives</title>
+  <desc id="ckpt-store-d">A grid comparing a plain text file, a text file written then renamed, a SQLite row and a Postgres row in the same transaction as the data. The plain file can be torn by a crash mid-write. The rename is atomic on the same filesystem but is not tied to the data write. SQLite gives durability but still commits separately from the data. A Postgres row updated inside the same transaction as the applied rows is the only option where the checkpoint and the data cannot disagree.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Where the checkpoint lives decides which crash you survive</text>
+  <text x="317" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">torn write?</text>
+  <text x="531" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">can disagree with data?</text>
+  <text x="745" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">use when</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">plain text file</text>
+  <rect x="213" y="84" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="317" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">yes — avoid</text>
+  <rect x="427" y="84" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="531" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="641" y="84" width="208" height="32" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <text x="745" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">never</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">write + atomic rename</text>
+  <rect x="213" y="124" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="427" y="124" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">yes, briefly</text>
+  <rect x="641" y="124" width="208" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="745" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">file sinks</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">SQLite row</text>
+  <rect x="213" y="164" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="427" y="164" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">yes, briefly</text>
+  <rect x="641" y="164" width="208" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="745" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">multi-process loops</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">same txn as the data</text>
+  <rect x="213" y="204" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="427" y="204" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="531" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="641" y="204" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="745" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">PostGIS sink</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">When the checkpoint and the data can disagree, make the replay idempotent — that is what closes the window you cannot remove.</text>
+</svg>
+<figcaption>Only the last row removes the window entirely, and it is available only when the sink is the same database. For a file-based sink, atomic rename plus idempotent replay is the honest best.</figcaption>
+</figure>
 
 Three properties are non-negotiable for the checkpoint store:
 
@@ -312,6 +355,38 @@ For the spatial index this means a delete-then-reinsert keyed on id, which is ex
 ## Monitoring Replication Lag and Alerting
 
 Replication lag is the age of the newest diff you have applied, measured against the upstream clock — not your own. Compute it as `now − server_ts`, where `server_ts` is the `timestamp=` from the applied diff's `.state.txt`. A healthy minutely pipeline sits at a lag of roughly one to three minutes: the newest diff is always a minute or two old at the source, and your apply adds a little. The signal that matters is not the absolute value but the **trend**. A lag that climbs monotonically means the pipeline is falling behind — either an apply is taking longer than the interval, or every cycle is hitting back-off — and it will never recover on its own because each minute adds a diff faster than you clear it.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="lag-signals-t lag-signals-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="lag-signals-t">Three lag signals and what each one alone fails to notice</title>
+  <desc id="lag-signals-d">Three panels. Sequence lag, the difference between head and applied sequence, catches a slow or stopped loop but reads as zero if the upstream stream itself has stalled. Timestamp lag, now minus the applied diff timestamp, catches an upstream stall too but is noisy when the stream publishes late. Loop heartbeat, time since the last successful iteration, catches a crashed process but says nothing about correctness. Each panel names the failure the other two miss.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three lag signals, three different blind spots</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Sequence lag</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">head_seq − applied_seq</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Catches: slow loop, stuck apply</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Blind to: upstream stream stalled</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">(both numbers freeze → lag reads 0)</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Alert above: 5 sequences</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Timestamp lag</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">now − applied diff timestamp</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Catches: upstream stall, slow loop</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Blind to: nothing, but noisy</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">(publishing is not exactly minutely)</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Alert above: 10 minutes</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Loop heartbeat</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">now − last successful iteration</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Catches: crashed or wedged process</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Blind to: applying the wrong diffs</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">(a fast wrong loop looks healthy)</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Alert above: 5 minutes</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The pairing that matters: sequence lag at zero <em>and</em> timestamp lag rising means the problem is upstream, not yours.</text>
+</svg>
+<figcaption>No single number is sufficient. Alert on sequence lag for pipeline health, timestamp lag for data freshness, and a heartbeat for liveness — the three fail in different directions.</figcaption>
+</figure>
 
 Emit lag as a gauge metric on every successful cycle and alert on two conditions: lag exceeding a ceiling (say ten minutes) for a sustained window, and *staleness* — no successful checkpoint advance within a window even though diffs exist upstream. The second catches a wedged process that is not erroring loudly but has simply stopped making progress. A useful third signal is the gap between the head sequence upstream and your checkpoint: fetch the top-level `state.txt` at the replication root, compare its sequence to yours, and you have an exact count of how many diffs you are behind, which is a cleaner backlog measure than seconds when you are recovering from an outage.
 

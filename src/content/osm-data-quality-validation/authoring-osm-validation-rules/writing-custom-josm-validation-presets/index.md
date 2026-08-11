@@ -29,9 +29,38 @@ Work through each item before loading anything; a preset that silently fails to 
 
 A JOSM tagging preset and a JOSM validator rule are two separate mechanisms that happen to cooperate. The preset is a form definition: an XML file that declares a dialog with fields, so that when a mapper opens the preset for a selected element, JOSM offers structured inputs — a text box for `name`, a combo for `fuel:diesel`, a checkbox for `self_service`. A preset never enforces anything; it only makes correct tagging easier to enter. Enforcement lives in the validator, which JOSM drives from MapCSS. A MapCSS validator rule is a selector plus an assertion: it matches primitives by tag and geometry, and when a matched primitive violates the condition encoded in the selector, JOSM emits a warning or error into the validation results panel. The two are complementary — the preset shapes input, the validator polices output — and a house rule usually wants both so that the field the preset offers is the field the validator insists on.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 230" role="img" aria-labelledby="mapcss-anatomy-t mapcss-anatomy-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="mapcss-anatomy-t">The parts of a MapCSS validator rule and what each contributes</title>
+  <desc id="mapcss-anatomy-d">An annotated breakdown of a MapCSS validator rule. The selector way[highway][!maxspeed] chooses which objects the rule considers. The throwWarning declaration supplies the mapper-facing message. The assertMatch and assertNoMatch declarations are test cases JOSM itself runs against the rule. And an optional fixAdd or fixChangeKey offers a one-click correction, which is what turns a warning into an edit.</desc>
+  <rect x="0" y="0" width="880" height="230" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">A MapCSS rule is a selector, a message, its own tests, and optionally a fix</text>
+  <rect x="26" y="52" width="258" height="136" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Selector</text>
+  <text x="40" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">way[highway][!maxspeed]</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Standard MapCSS matching</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Tag presence, absence, regex</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Combine with , for alternatives</text>
+  <rect x="310" y="52" width="258" height="136" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Message + level</text>
+  <text x="324" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">throwWarning: tr("...")</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Or throwError for a hard stop</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">tr() makes it translatable</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Say what to do, not what is wrong</text>
+  <rect x="594" y="52" width="258" height="136" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Tests and fix</text>
+  <text x="608" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">assertMatch: "way highway=primary"</text>
+  <text x="608" y="125" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">assertNoMatch:` for the clean case</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">JOSM runs these on load</text>
+  <text x="608" y="167" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">fixAdd:` offers a one-click repair</text>
+  <text x="868" y="214" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Ship every rule with at least one assertMatch and one assertNoMatch — they cost two lines and they are the reason the rule still works next release.</text>
+</svg>
+<figcaption>The assertions are the underused part: JOSM validates your validator, so a rule with assertions cannot silently stop matching after a selector change.</figcaption>
+</figure>
+
 The selector syntax is the load-bearing part. MapCSS matches on attribute presence and value: `*[amenity=fuel]` matches any primitive carrying that exact tag, and chaining a second condition with `[!name]` narrows the match to those additionally missing a `name` key. When such a primitive is selected or the validator runs, the rule body fires `throwWarning` with a human-readable message, and optionally a `fixAdd`/`fixRemove` auto-fix suggestion. Because MapCSS evaluation is scoped to the current selection and dataset in memory, the check is immediate: there is no server round-trip and no upload required, which is what makes it a live editing guardrail rather than a post-hoc audit. The diagram below traces how a single selected element flows through both mechanisms.
 
-<svg viewBox="0 0 960 380" role="img" aria-label="How a JOSM preset and a MapCSS validator rule evaluate one selected element. A selected primitive tagged amenity=fuel with no name flows two ways. Upward, the tagging preset XML opens a form offering a name text field, a fuel combo, and a self_service checkbox, which writes structured tags back onto the element. Downward, the MapCSS validator rule tests the selector amenity=fuel and not name; because name is absent the rule matches and throwWarning emits a Missing name on fuel station entry into the JOSM validation results panel, with an optional fix suggestion." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:960px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 960 380" role="img" aria-label="How a JOSM preset and a MapCSS validator rule evaluate one selected element. A selected primitive tagged amenity=fuel with no name flows two ways. Upward, the tagging preset XML opens a form offering a name text field, a fuel combo, and a self_service checkbox, which writes structured tags back onto the element. Downward, the MapCSS validator rule tests the selector amenity=fuel and not name; because name is absent the rule matches and throwWarning emits a Missing name on fuel station entry into the JOSM validation results panel, with an optional fix suggestion." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Preset and MapCSS validator evaluating one selected element</title>
   <desc>A selected amenity=fuel element with no name feeds a tagging preset form above and a MapCSS validator rule below; the selector amenity=fuel plus not-name matches, and throwWarning writes a warning into the validation results panel.</desc>
   <defs>
@@ -39,6 +68,7 @@ The selector syntax is the load-bearing part. MapCSS matches on attribute presen
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="960" height="380" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- selected element -->
     <rect x="30" y="150" width="180" height="80" rx="6" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-width="1.5"/>
@@ -169,6 +199,34 @@ Confirm both halves work before relying on them:
 | Warning does not block upload | Used `throwOther` instead of `throwWarning` | Switch to `throwWarning` for upload-blocking severity. |
 | Combo writes wrong value | `text` attribute confused with `value` | Put stored values in `values=`, labels in `text=`. |
 | Rule matches ways it should not | Selector used `*` without a geometry guard | Prefix with `node`, `way`, or `area` to scope geometry. |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="mapcss-err-t mapcss-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="mapcss-err-t">Three MapCSS mistakes that make a preset unhelpful</title>
+  <desc id="mapcss-err-d">A grid of three mistakes with symptom and fix. Using throwError for a stylistic preference blocks the upload of correct data, fixed by reserving throwError for genuine breakage. Matching on a tag that is legitimately absent in whole regions produces a warning on nearly every way there, fixed by adding a region or tag guard. Offering a fixAdd that guesses a value writes a plausible but unverified tag into the map, fixed by offering a fix only where the correct value is derivable from other tags.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The fix button is the one to be conservative with</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">symptom</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">fix</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">throwError for a style preference</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">correct edits blocked</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">reserve throwError for breakage</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">matching a regionally absent tag</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">warning on nearly every way</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">guard by region or companion tag</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">fixAdd guesses a value</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">unverified data uploaded</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">only fix what is derivable</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">A validator that cries wolf gets switched off, and a validator that is switched off catches nothing at all.</text>
+</svg>
+<figcaption>The third is the one with consequences beyond your own screen: a one-click fix that guesses turns an editor convenience into a source of unverified data in the global map.</figcaption>
+</figure>
 
 For house rules that must run outside the editor as well, mirror the same conditions in a batch check such as [Flagging Deprecated OSM Tags in a Pipeline](https://www.osm-data-processing.org/osm-data-quality-validation/tag-and-attribute-consistency-checks/flagging-deprecated-osm-tags-in-a-pipeline/) so an unedited import cannot bypass the guardrail.
 

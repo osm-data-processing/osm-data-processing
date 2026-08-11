@@ -14,12 +14,13 @@ date: 2026-07-14
 
 Every OpenStreetMap diff-sync pipeline lives or dies by a single integer. The replication sequence number is the monotonic counter that names each published change file, and the moment a pipeline loses track of which number it has already applied, correctness collapses in one of two silent ways: it re-applies a diff it already consumed (double-counting edits, resurrecting deleted objects) or it skips one entirely (leaving a permanent hole in the local database that no later diff will ever fill). Neither failure raises an exception — the pipeline keeps running, the row counts keep climbing, and the divergence from upstream only surfaces weeks later when a routing graph has a road that was deleted in reality or a building that upstream never had. This guide is the bookkeeping layer of the [OSM Replication & Diff Sync](https://www.osm-data-processing.org/osm-replication-diff-sync/) section: it defines exactly what a sequence number is, where the `state.txt` that carries it lives, how the number encodes a directory path, and how to persist your applied position so a crashed process resumes on the correct diff rather than guessing.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 380" role="img" aria-label="How an OSM replication sequence number maps to a directory path and a state.txt file. The integer 6123456 is left-padded to nine digits 006123456, split into three groups of three digits 006, 123 and 456, and joined with slashes to form the path 006/123/456. Appending that under the replication base URL and minute interval yields the object URLs ending in 456.state.txt and 456.osc.gz. The state.txt file itself contains a sequenceNumber field equal to 6123456 and a timestamp field in ISO 8601 UTC." style="width:100%;max-width:1040px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 380" role="img" aria-label="How an OSM replication sequence number maps to a directory path and a state.txt file. The integer 6123456 is left-padded to nine digits 006123456, split into three groups of three digits 006, 123 and 456, and joined with slashes to form the path 006/123/456. Appending that under the replication base URL and minute interval yields the object URLs ending in 456.state.txt and 456.osc.gz. The state.txt file itself contains a sequenceNumber field equal to 6123456 and a timestamp field in ISO 8601 UTC." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Sequence number to replication path and state.txt fields</title>
   <desc>The sequence 6123456 is zero-padded to 006123456, split 006/123/456, and appended to the base URL to locate 456.state.txt and 456.osc.gz; the state.txt holds sequenceNumber and timestamp fields.</desc>
   <defs>
     <marker id="rsn-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1040" height="380" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="520" y="26" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">One integer names one change file — the path is derived, not stored</text>
   <!-- sequence integer -->
   <rect x="40" y="52" width="220" height="60" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -84,6 +85,37 @@ The `timestamp` field answers "what wall-clock moment is this data current as of
 ## The Replication Directory Layout
 
 OSM publishes diffs at three cadences under `planet.openstreetmap.org/replication/` — `minute/`, `hour/`, and `day/` — and each cadence has its own independent sequence counter. Within a cadence, the sequence number is not used as a flat filename; it is exploded into a three-level directory tree so that no single directory ever holds millions of entries. The rule is fixed: left-pad the integer to nine digits, then cut it into three groups of three.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="seq-dirs-t seq-dirs-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="seq-dirs-t">How many files sit in each level of the replication directory tree</title>
+  <desc id="seq-dirs-d">A left-to-right chain showing the three-level split of a nine-digit padded sequence. The top level holds up to 1000 directories, each holding up to 1000 directories, each holding up to 1000 sequences as pairs of a .state.txt and a .osc.gz. The layout exists because a single flat directory of ten million entries is unusable on most filesystems, and it means the path is computed from the number rather than looked up.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="sqd" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">006 / 123 / 456 — three levels of a thousand, computed not listed</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">sequence 6 123 456</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">pad to 9 digits</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">006123456</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#sqd)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">level 1: 006/</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">≤ 1 000 dirs</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">millions bucket</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#sqd)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">level 2: 123/</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">≤ 1 000 dirs</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">thousands bucket</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#sqd)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">level 3: 456.*</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">.state.txt + .osc.gz</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">the two objects</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">At minutely cadence the tree gains 1 440 leaf pairs a day, so the middle level rolls over roughly every two years.</text>
+</svg>
+<figcaption>The split is arithmetic, not an index — which is why a client can construct the URL for any sequence without listing anything. No directory listing is ever needed, and none is offered.</figcaption>
+</figure>
 
 A sequence like `6123456` becomes the padded string `006123456`, which splits into `006`, `123`, `456`, giving the path `006/123/456`. Under the minutely stream that resolves to two URLs:
 
@@ -202,6 +234,39 @@ def parse_state_txt(text: str) -> dict[str, object]:
 ## Validation & Error-Handling Matrix
 
 Sequence and state handling fails in characteristic ways. Each row is a real fault seen in production sync loops, with how to catch and fix it.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="seq-fail-t seq-fail-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="seq-fail-t">Four ways sequence tracking fails and the symptom each one shows</title>
+  <desc id="seq-fail-d">A grid of four sequence-tracking faults against symptom and detection. A checkpoint written before the apply gives permanent silent data loss, detected only by comparing object counts against upstream. A checkpoint written twice by overlapping processes gives interleaved sequences, detected by a non-monotonic checkpoint. Parsing state.txt without unescaping the colons in the timestamp gives an unparseable date, detected immediately. Trusting the PBF header sequence after applying diffs gives a sequence that is stale by however many diffs were applied, detected by comparing header and checkpoint.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Two of these four fail loudly; the other two are why you compare counts</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">symptom</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">how you find out</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">checkpoint written before apply</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">a diff is skipped forever</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">object counts drift from upstream</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">two processes, one state file</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">sequences interleave</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">checkpoint goes backwards</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">colons in state.txt not unescaped</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">timestamp fails to parse</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">immediately, with an exception</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">PBF header trusted after updates</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">resume from a stale point</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">header ≠ checkpoint</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The header sequence records where the file <em>started</em>. Once you have applied one diff it is history, not state.</text>
+</svg>
+<figcaption>Only two of these four announce themselves. The first is the one to design against, because nothing in the pipeline will ever raise for it.</figcaption>
+</figure>
 
 | Error condition | Root cause | Detection | Remediation |
 |---|---|---|---|

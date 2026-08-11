@@ -13,12 +13,13 @@ date: 2026-07-14
 # OSM Data Quality & Validation
 
 <figure class="diagram-wrap">
-<svg viewBox="0 0 1060 356" role="img" aria-labelledby="oqv-flow-title oqv-flow-desc" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1060px;display:block;margin:1.5rem auto;font-family:inherit;color:var(--c-ink)">
+<svg viewBox="0 0 1060 356" role="img" aria-labelledby="oqv-flow-title oqv-flow-desc" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;color:var(--c-ink)">
   <title id="oqv-flow-title">OSM validation pipeline: parsed features through a rule engine to a report and quarantine</title>
   <desc id="oqv-flow-desc">A horizontal data-flow diagram. Parsed OSM features enter a rule engine that evaluates each feature against a selector then a predicate. The engine fans out to four check families run in parallel: geometry checks, topology checks, tag checks, and schema checks. Their results converge on a verdict stage that separates clean features, which pass through to the report, from flagged features, which are routed to a quarantine store, and every finding is written to the report.</desc>
   <defs>
     <marker id="oqv-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1060" height="356" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="530" y="22" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">One rule engine, four check families, two outcomes</text>
   <!-- parsed features -->
   <rect x="24" y="150" width="152" height="60" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -115,6 +116,37 @@ The recurring predicate types are: **value-domain** checks (does `oneway` hold o
 
 Placement matters as much as the rules themselves. A validation gate that runs after data has already been loaded into the serving store catches nothing useful; it only tells you what you already shipped. Effective pipelines run validation at three distinct points, each with a different mandate.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="qa-gates-t qa-gates-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="qa-gates-t">What each validation gate can catch, and what it is already too late to catch</title>
+  <desc id="qa-gates-d">A left-to-right chain of four gate positions in an ETL. At ingest, only format and encoding faults are visible, and rejection is cheap. After geometry building, ring closure and self-intersection become visible, and repair is still local. After graph building, connectivity and turn-restriction faults appear, but repair means rebuilding the graph. After publication, only user reports remain, and the cost is a re-release. A note says the cost of a defect roughly multiplies by ten at each stage.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="qag" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The same defect costs an order of magnitude more at each later gate</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">at ingest</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">format · encoding</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">reject: cost ≈ 1</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#qag)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">after geometry</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">closure · validity</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">repair locally: ≈ 10</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#qag)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">after graph build</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">connectivity · turns</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">rebuild graph: ≈ 100</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#qag)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">after publication</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">user reports only</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">re-release: ≈ 1 000</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">This is also the argument against one big validation stage at the end: the checks that are cheap to act on are exactly the ones that must run first.</text>
+</svg>
+<figcaption>Placing a check is really choosing what it will cost to act on it. A connectivity fault found at ingest is unknowable; found after publication it is a re-release.</figcaption>
+</figure>
+
 The first is a **structural gate** immediately after parsing, sharing the spec-compliance checks described in the [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) reference: header features, reference closure, size ceilings. A failure here is fatal to the batch because the bytes themselves cannot be trusted. The second is a **semantic gate** after reconstruction and normalization, where geometry, topology, and tag rules run against fully-formed features; this is where the bulk of the rule catalogue lives and where quarantine, not abort, is the right response. The third is an **output gate** just before publication, asserting invariants on the finished product — row counts within expected bounds, no null geometries in the routing table, attribution metadata present — so a regression in an upstream stage cannot silently ship.
 
 <script type="application/ld+json">
@@ -142,6 +174,39 @@ Aborting is correct only for structural failures that poison everything downstre
 ## A Severity Taxonomy
 
 Severity is the field that makes a validation report actionable, and an inconsistent taxonomy makes it noise. Borrowing the vocabulary the major QA tools already share keeps your reports legible to anyone who has used them.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="qa-sev-t qa-sev-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="qa-sev-t">Four severity levels and the pipeline action each one triggers</title>
+  <desc id="qa-sev-d">A grid of four severities against the automated action and the human path. Fatal means the object is dropped and the run fails, with a page to on-call. Error means the object is quarantined and the run continues, with a ticket per batch. Warning means the object passes with a flag and is counted, reviewed weekly as a trend. Info means the object passes and is only recorded, reviewed only when investigating something else.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Severity is a decision about what happens next, not a description of badness</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what the pipeline does</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">who sees it, and when</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">fatal</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">drop object, fail the run</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">on-call, immediately</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">error</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">quarantine, run continues</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">one ticket per batch</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">warning</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">pass with a flag, counted</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">weekly, as a trend line</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">info</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">pass, recorded only</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">when investigating something else</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">If a rule cannot be assigned one of these four, it is not ready to be a rule yet.</text>
+</svg>
+<figcaption>The value of the taxonomy is that it makes the action automatic. A finding whose severity does not map to a defined action will be discussed every time it appears and acted on none of them.</figcaption>
+</figure>
 
 | Severity | Meaning | Pipeline action | Example |
 | --- | --- | --- | --- |

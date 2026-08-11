@@ -27,15 +27,42 @@ Keep an `osm2pgsql`- or `imposm`-loaded PostGIS database current by appending mi
 
 A file-based update rewrites the entire `.osm.pbf` for every diff; a database-based update instead applies the diff's create/modify/delete operations as row-level `INSERT`/`UPDATE`/`DELETE` against the rendered tables, so cost tracks the number of changed objects rather than database size. That is why a minutely cadence — impractical against a large file, as the parent guide [Applying .osc Change Files with osmium](https://www.osm-data-processing.org/osm-replication-diff-sync/applying-osc-change-files-with-osmium/) notes — is entirely comfortable against PostGIS.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="slim-mode-t slim-mode-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="slim-mode-t">What osm2pgsql slim mode stores and why an update is impossible without it</title>
+  <desc id="slim-mode-d">Two panels. Without slim mode, osm2pgsql keeps only the rendered output tables; an incoming diff names an object identifier that the database can no longer resolve to a row, so update is impossible and a full reimport is the only path. With slim mode, the middle tables planet_osm_nodes, ways and rels persist the raw object graph, so a diff can look up the affected object, find every way and relation that depends on it, and rebuild just those rows.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The middle tables are what make an update possible</text>
+  <rect x="26" y="52" width="401" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Without --slim</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Output tables only: point, line, polygon</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Raw node coordinates discarded after import</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">A diff names id 240111883 — no row to find</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Dependent ways cannot be identified</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Only recovery: full reimport, many hours</text>
+  <rect x="453" y="52" width="401" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">With --slim</text>
+  <text x="467" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Middle tables: planet_osm_nodes / ways / rels</text>
+  <text x="467" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Raw object graph persisted alongside output</text>
+  <text x="467" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Diff resolves id → row directly</text>
+  <text x="467" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Reverse lookup finds dependent ways and rels</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Update touches only the affected rows</text>
+  <text x="868" y="235" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Budget roughly 40 percent more disk for the middle tables on a country extract, and use --drop only when you have decided this is the last import.</text>
+</svg>
+<figcaption>Slim mode is not a performance flag; it is the difference between a database that can be updated and one that can only be rebuilt. The extra disk it costs buys the ability to apply a diff at all.</figcaption>
+</figure>
+
 The load-bearing requirement is **slim mode**. To turn a diff's `modify way 12345 v8` into the right SQL, the updater must know that way's previous geometry and which rendered rows it produced — it must resolve node references to coordinates and remember prior state. `osm2pgsql --slim` persists that bookkeeping in the `planet_osm_nodes`, `planet_osm_ways`, and `planet_osm_rels` tables; without them the tool has no way to reconstruct the delta and simply refuses to append. `imposm` keeps the equivalent state in its own cache directory. Either way, the update path is: fetch the ordered diffs, apply them with `--append`, and advance the recorded sequence only after the database transaction commits — the same atomic-at-the-state-boundary discipline the [OSM Replication & Diff Sync](https://www.osm-data-processing.org/osm-replication-diff-sync/) section insists on.
 
-<svg viewBox="0 0 960 300" role="img" aria-label="Minutely diff loop into PostGIS. A scheduler fires the loop. The loop reads the stored sequence, fetches the minutely diff for the next sequence, and runs osm2pgsql in append slim mode which applies row-level inserts, updates, and deletes to the PostGIS tables. On a committed transaction the sequence is advanced and the loop waits for the next tick." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:960px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="4 -3 852 199" role="img" aria-label="Minutely diff loop into PostGIS. A scheduler fires the loop. The loop reads the stored sequence, fetches the minutely diff for the next sequence, and runs osm2pgsql in append slim mode which applies row-level inserts, updates, and deletes to the PostGIS tables. On a committed transaction the sequence is advanced and the loop waits for the next tick." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Minutely fetch-append-commit loop updating PostGIS in place</title>
   <desc>A scheduler fires a loop that reads the stored sequence, fetches the next minutely diff, and applies it with osm2pgsql append slim mode as row-level changes to PostGIS. After the transaction commits the sequence advances and the loop waits for the next tick.</desc>
   <defs>
     <marker id="pg-diff-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="4" y="-3" width="852" height="199" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="480" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Fetch, append in slim mode, commit, advance</text>
+  <g transform="translate(0,-70)">
   <!-- fetch -->
   <rect x="20" y="118" width="158" height="70" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
   <text x="99" y="146" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">Fetch diff</text>
@@ -59,6 +86,7 @@ The load-bearing requirement is **slim mode**. To turn a diff's `modify way 1234
   <!-- loop back -->
   <path d="M756,188 V250 H99 V190" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#pg-diff-arrow)"/>
   <text x="430" y="244" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">wait for next minute · repeat</text>
+  </g>
 </svg>
 
 ## Runnable solution
@@ -152,6 +180,39 @@ imposm run -config imposm.json -connection "postgis://osm@localhost/osm"
 - **A known edit landed.** Pick a recently edited object id and query `planet_osm_line` / `planet_osm_polygon` for it; its geometry or tags should reflect the change.
 - **No slim-mode error.** The absence of `Cannot apply diffs to a database that was not imported with --slim` in the log confirms the base import was slim.
 - **Timestamps track live.** The `osm2pgsql` replication status (or `imposm`'s log) should report a lag of a few minutes at most under a minutely schedule.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="pg-verify-t pg-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="pg-verify-t">Four checks that distinguish a working diff loop from one that only appears to run</title>
+  <desc id="pg-verify-d">A grid of four verification checks against what a healthy result and a broken result look like. The stored sequence should advance every tick; if it is unchanged the loop is not committing. Row counts in planet_osm_point should drift by hundreds per hour; a frozen count means the apply is a no-op. The oldest un-applied sequence should stay near zero; a growing value means the loop is slower than the stream. And a spot-checked recently edited object should match the live API; a mismatch means diffs are being skipped.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four checks, because a stalled loop still logs success</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">healthy</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">broken — and how it looks</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">stored sequence</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">advances every tick</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">unchanged: commit never ran</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">row counts</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">drifts by 100s/hour</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">frozen: apply is a no-op</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">replication lag</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">under 2 minutes</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">growing: loop slower than stream</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">spot-check vs API</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">object matches live</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">differs: diffs being skipped</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Wire the first three into your metrics; run the fourth by hand after any change to the loop.</text>
+</svg>
+<figcaption>Three of these four look identical to a healthy pipeline in the logs. Checking the stored sequence alone is what lets a silently no-op loop run for weeks.</figcaption>
+</figure>
 
 ## Common errors and fixes
 

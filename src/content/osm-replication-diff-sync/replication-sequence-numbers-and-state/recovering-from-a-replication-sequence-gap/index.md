@@ -27,14 +27,43 @@ A diff-sync process reports a local applied sequence that is more than one step 
 
 Replication offers no notification that a step was missed. The protocol guarantees only that if you apply every sequence in ascending order exactly once, your data converges to upstream; violate that — skip `455`, or apply `456` before `455` — and the local database silently diverges, because OSM diffs are not commutative. Each `.osc.gz` encodes creates, modifications, and deletes keyed to specific object versions, so applying them out of order can, for example, try to modify an object a later diff already deleted, or resurrect one an earlier diff removed. The only detector is your own bookkeeping: the gap is the difference between the last sequence you recorded as applied and the sequence upstream reports as current.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="gap-kinds-t gap-kinds-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="gap-kinds-t">Three kinds of sequence gap and the recovery each one needs</title>
+  <desc id="gap-kinds-d">A grid of three gap causes against the correct recovery. A contiguous gap from downtime, where every missing diff is still published, is recovered by replaying the range in ascending order. A gap where part of the range has aged out of the stream is recovered by resetting from a fresh base extract, because the missing edits cannot be reconstructed. A checkpoint that is ahead of the data, from writing state before applying, cannot be recovered by replay at all and needs a rebuild, because the pipeline does not know which diffs were really applied.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Not every gap is recoverable by replaying diffs</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">can you replay?</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">correct recovery</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">downtime, range still published</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">replay ascending, one at a time</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">part of the range aged out</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">fresh base extract, re-anchor</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">checkpoint ahead of the data</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">no — extent unknown</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">rebuild from a known-good base</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Detecting the third case at all requires an independent check — object counts against upstream, or a spot-check against the live API.</text>
+</svg>
+<figcaption>The third case is the reason checkpoint ordering matters so much. A gap you can see is a delay; a checkpoint that lies about the past is a rebuild.</figcaption>
+</figure>
+
 Recovery has two shapes. When the missing range is small and still published, the fix is to replay every sequence from `checkpoint + 1` up to the upstream cursor, strictly in order — this is a normal catch-up, just triggered by gap detection rather than a schedule. When the local state is already inconsistent (a diff was applied out of order, or the missing range has aged out of the feed's retained history), no replay can repair it, and the correct move is to reset from a fresh base extract whose PBF header carries a known-good replication anchor, discarding the diverged state entirely. Distinguishing the two is what this page is about; the actual application of diffs is covered in [applying OSC change files with osmium](https://www.osm-data-processing.org/osm-replication-diff-sync/applying-osc-change-files-with-osmium/), and the numbering it relies on comes from the parent guide, [Replication Sequence Numbers & State Tracking](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/).
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 340" role="img" aria-label="Decision flow for recovering from a replication sequence gap. The local checkpoint sequence is compared against the upstream cursor. If they are equal the pipeline is in sync. If the local sequence is exactly one behind, apply the next diff normally. If it is several behind but the missing range is still published, replay the range in ascending order. If the local state is inconsistent or the missing range has aged out of history, reset from a fresh base extract." style="width:100%;max-width:920px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 340" role="img" aria-label="Decision flow for recovering from a replication sequence gap. The local checkpoint sequence is compared against the upstream cursor. If they are equal the pipeline is in sync. If the local sequence is exactly one behind, apply the next diff normally. If it is several behind but the missing range is still published, replay the range in ascending order. If the local state is inconsistent or the missing range has aged out of history, reset from a fresh base extract." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Sequence gap recovery decision flow</title>
   <desc>Compare local checkpoint to upstream cursor: equal means in sync; one behind means apply next; several behind and still published means replay the range in order; inconsistent or aged out means reset from a fresh base.</desc>
   <defs>
     <marker id="rsg-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="920" height="340" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="460" y="26" text-anchor="middle" font-size="14" fill="currentColor" font-weight="700">local checkpoint vs upstream cursor decides the recovery path</text>
   <!-- top compare box -->
   <rect x="330" y="46" width="260" height="52" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -164,6 +193,37 @@ def replay_range(report: GapReport, base_url: str, apply_one, save_checkpoint) -
 - **Confirm monotonic checkpoints.** The checkpoint's sequence must only ever increase; a log showing it decrement means an out-of-order apply and mandates a reset.
 - **Reject the reset path silently succeeding.** If `action` is `reset`, replay must raise rather than log success — verify the `RuntimeError` fires so a diverged database is never reported as recovered.
 - **Watch the countdown log.** The `remaining` counter in each replay line should decrease by one every step; a stall or jump signals a fetch failure mid-range.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="gap-verify-t gap-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="gap-verify-t">Proving a gap recovery actually closed the hole</title>
+  <desc id="gap-verify-d">A left-to-right chain of four checks after a recovery. The checkpoint must equal the stream head. Replaying the recovered range a second time must be a no-op, proving idempotence. A spot-check of objects known to have been edited during the gap window must match the live API. And ongoing lag must settle back to its normal band rather than plateauing, which would mean the loop is still behind.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="gvf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four checks — the replay-twice test is the one that proves the applier</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">checkpoint = head</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">the arithmetic closes</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">necessary, not sufficient</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#gvf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">replay the range again</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">must change nothing</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">proves idempotence</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#gvf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">spot-check the window</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">objects edited during the gap</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">match the live API</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#gvf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">watch the lag settle</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">back to its normal band</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">a plateau means still behind</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Record the recovered range in the run log. The next person to see a count discrepancy will want to know which window was replayed and when.</text>
+</svg>
+<figcaption>The second check is the one worth automating: if replaying the same range twice changes anything, the applier is not version-safe and the recovery cannot be trusted.</figcaption>
+</figure>
 
 ## Common errors and fixes
 

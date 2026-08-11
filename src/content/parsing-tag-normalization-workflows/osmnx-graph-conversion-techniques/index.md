@@ -13,7 +13,7 @@ date: 2026-06-26
 
 Turning raw OpenStreetMap ways into a deterministic, topology-validated `networkx.MultiDiGraph` is the step where a normalization pipeline either earns or loses the trust of every routing engine downstream. OSMnx is the most accessible abstraction for this conversion, but its defaults are tuned for exploratory notebooks, not production spatial ETL: it retains permissive tags, preserves every degree-2 node, leaves `maxspeed` as free-text strings, and keeps disconnected subgraphs that quietly break shortest-path queries. The concrete failure scenario is familiar — an A* call returns `NetworkXNoPath` for two points that are obviously connected on the map, because the source node landed in a 3-edge island that survived extraction, or travel times come back as `inf` because `"50;30"` never parsed to a float. This page shows how to convert OSM ways into routing-ready graphs that behave identically across reruns, regions, and machines.
 
-<svg viewBox="0 0 820 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow diagram of OSMnx graph conversion: cleaned OSM ways feed ox.graph_from_bbox or graph_from_gdfs, then ox.simplify_graph merges degree-2 nodes, then ox.project_graph reprojects from EPSG:4326 to a UTM zone, then edge weights for length and travel_time are computed, and finally A-star or Dijkstra routing consumes the graph" style="width:100%;max-width:820px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 820 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow diagram of OSMnx graph conversion: cleaned OSM ways feed ox.graph_from_bbox or graph_from_gdfs, then ox.simplify_graph merges degree-2 nodes, then ox.project_graph reprojects from EPSG:4326 to a UTM zone, then edge weights for length and travel_time are computed, and finally A-star or Dijkstra routing consumes the graph" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>OSMnx Graph Conversion Data Flow</title>
   <desc>A six-stage pipeline arranged as a snake. Top row left to right: cleaned OSM ways as a GeoDataFrame, ox.graph_from_bbox or graph_from_gdfs, and ox.simplify_graph which merges degree-2 nodes. The flow drops down the right side into the bottom row, which runs right to left: ox.project_graph reprojecting EPSG:4326 to the UTM zone, edge weights computing length and travel_time, and finally A-star or Dijkstra routing.</desc>
   <defs>
@@ -21,6 +21,7 @@ Turning raw OpenStreetMap ways into a deterministic, topology-validated `network
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="820" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="none" stroke="currentColor" stroke-width="1.5">
     <rect x="20"  y="50"  width="230" height="70" rx="7"/>
     <rect x="295" y="50"  width="230" height="70" rx="7"/>
@@ -228,6 +229,37 @@ Use deterministic random seeds for any stochastic imputation step so the validat
 
 For continental-scale pipelines, preprocessing raw `.osm.pbf` files before graph construction dramatically improves throughput. Streaming primitives into memory-mapped buffers, filtering at the byte level, and feeding cleaned GeoDataFrames directly into `ox.graph_from_gdfs` decouples extraction from conversion, reducing peak RAM and enabling parallel regional tiling — the chunking patterns in [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) apply directly here.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 366" role="img" aria-labelledby="osmnx-cost-t osmnx-cost-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osmnx-cost-t">What each stage of a graph build costs on a city extract</title>
+  <desc id="osmnx-cost-d">A bar chart of seconds per stage building a routable graph for a city extract. Reading and filtering the PBF to highway ways takes 6 seconds. Resolving node references into coordinates takes 11. Splitting ways at shared junction nodes takes 34, the largest single cost. Building the network structure takes 9. Simplifying degree-two chains takes 22. Computing edge geometries and lengths takes 14.</desc>
+  <rect x="0" y="0" width="880" height="366" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Junction splitting is the expensive stage, and the easy one to get wrong</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">seconds per stage, city extract, single core</text>
+  <line x1="250" y1="68" x2="250" y2="312" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">read + filter to highways</text>
+  <rect x="250" y="74" width="81" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="341" y="89" font-size="11" fill="currentColor" opacity="0.9">6 s</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">resolve node references</text>
+  <rect x="250" y="116" width="149" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="409" y="131" font-size="11" fill="currentColor" opacity="0.9">11 s</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">split ways at junctions</text>
+  <rect x="250" y="158" width="460" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="720" y="173" font-size="11" fill="currentColor" opacity="0.9">34 s · touches every node</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">build the network structure</text>
+  <rect x="250" y="200" width="121" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="381" y="215" font-size="11" fill="currentColor" opacity="0.9">9 s</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">simplify degree-2 chains</text>
+  <rect x="250" y="242" width="298" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="558" y="257" font-size="11" fill="currentColor" opacity="0.9">22 s · removes ~72% of nodes</text>
+  <text x="240" y="299" text-anchor="end" font-size="11.5" fill="currentColor">edge geometry + lengths</text>
+  <rect x="250" y="284" width="190" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="450" y="299" font-size="11" fill="currentColor" opacity="0.9">14 s</text>
+  <text x="868" y="348" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">The two slow stages are also the two that change the graph semantics. Cache their output keyed on the input hash rather than reimplementing them faster.</text>
+</svg>
+<figcaption>Junction splitting dominates because it is the stage that has to look at every node of every way rather than every way. It is also the stage most often reimplemented badly.</figcaption>
+</figure>
+
 Practical scaling levers:
 
 1. **Chunked processing with checkpointing.** Divide large bounding boxes into non-overlapping grid cells driven by the tiling scheme in [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/). Persist each processed tile to disk before merging, and resume from the last successful checkpoint rather than restarting the full extract.
@@ -267,7 +299,7 @@ route = nx.shortest_path(G, orig, dest, weight="travel_time")
 
 Records that fail normalization or validation should not be dropped silently; route them to the same dead-letter discipline used in [Error Handling in Large OSM Extracts](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/), and reconcile the canonical attribute names against the registries defined in [Batch Attribute Mapping Strategies](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/batch-attribute-mapping-strategies/) so the graph's edge schema matches every other store in the pipeline.
 
-<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="End-to-end build_graph lifecycle: extract, normalize, project, weight, and validate stages run left to right into a routing-ready MultiDiGraph. Records that fail normalization or validation branch downward into a shared dead-letter queue rather than being dropped silently." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="End-to-end build_graph lifecycle: extract, normalize, project, weight, and validate stages run left to right into a routing-ready MultiDiGraph. Records that fail normalization or validation branch downward into a shared dead-letter queue rather than being dropped silently." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>build_graph Lifecycle with Dead-Letter Branch</title>
   <desc>Five numbered process stages run left to right: 1 extract via graph_from_bbox or gdfs, 2 normalize edge tags with regex coercion, 3 project to a pinned UTM CRS, 4 weight edges with speed and travel_time, and 5 validate by keeping the largest weakly-connected component. The pipeline ends in a routing-ready MultiDiGraph output. Dashed branches drop from the normalize and validate stages into a single dead-letter queue at the bottom, capturing records that fail normalization or validation so none are dropped silently.</desc>
   <defs>
@@ -275,6 +307,7 @@ Records that fail normalization or validation should not be dropped silently; ro
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="900" height="300" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="none" stroke="currentColor" stroke-width="1.5">
     <rect x="16"  y="58" width="128" height="64" rx="7"/>
     <rect x="164" y="58" width="128" height="64" rx="7"/>

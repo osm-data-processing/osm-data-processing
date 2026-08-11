@@ -26,9 +26,37 @@ Repair the malformed OSM tags that abort an ingest — trailing zero-width chara
 
 OpenStreetMap stores tags as arbitrary string key-value pairs with no schema enforcement, so any editor, import, or regional convention can introduce a value that is syntactically valid UTF-8 yet semantically broken. "Malformed" here is a pipeline concept, not a format error: the PBF decoded cleanly, but the string carries a trailing `U+200B` zero-width space, a key was typed `Highway` instead of `highway`, or a German editor wrote `1.200` meaning twelve hundred. Each of these passes a naive `str` check and then silently corrupts a join key, a unit conversion, or an edge weight several stages downstream. This stage belongs to [Error Handling in Large OSM Extracts](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/) and enforces the canonical schema produced earlier by [Value Standardization & Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/) — it does not invent that schema, it repairs deviations from it.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="mal-sources-t mal-sources-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="mal-sources-t">What produces malformed tag values, by share of the anomalies found</title>
+  <desc id="mal-sources-d">A bar chart of the share of malformed tag values by cause in a country extract. Copy-paste from a spreadsheet or web page contributes 38 percent, bringing non-breaking spaces and smart quotes. Locale-formatted numbers such as a comma decimal separator contribute 24 percent. Unit suffixes mixed into numeric fields contribute 19 percent. Trailing or doubled separators in semicolon lists contribute 13 percent. And control or zero-width characters contribute 6 percent, invisible in every editor.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">What actually produces malformed values</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">share of anomalous tag values by cause, country extract</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">paste artefacts (NBSP, smart quotes)</text>
+  <rect x="250" y="74" width="447" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="707" y="89" font-size="11" fill="currentColor" opacity="0.9">38% — invisible in most editors</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">locale-formatted numbers</text>
+  <rect x="250" y="116" width="282" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="542" y="131" font-size="11" fill="currentColor" opacity="0.9">24% — "1.200" meaning 1200</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">units inside numeric fields</text>
+  <rect x="250" y="158" width="223" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="483" y="173" font-size="11" fill="currentColor" opacity="0.9">19% — "30 mph", "3.5 t"</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">trailing / doubled separators</text>
+  <rect x="250" y="200" width="153" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="413" y="215" font-size="11" fill="currentColor" opacity="0.9">13% — "a;b;" and "a;;b"</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">control and zero-width chars</text>
+  <rect x="250" y="242" width="70" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="330" y="257" font-size="11" fill="currentColor" opacity="0.9">6% — U+200B, U+FEFF</text>
+  <text x="868" y="306" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">The last row is small and disproportionately expensive: a zero-width space makes two identical-looking values compare unequal for the life of the dataset.</text>
+</svg>
+<figcaption>The distribution argues for a specific order of operations: normalise whitespace and Unicode first, because that single step addresses nearly half of what you will find.</figcaption>
+</figure>
+
 The repair must be *idempotent*: running it twice produces the same output as running it once, so a resumed or re-driven ingest never double-mutates a value. It must also be *memory-bounded*, because continental extracts exceed RAM and the sanitization has to run over bounded slices rather than one monolithic frame — the streaming mechanics come from [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/). The order is fixed: profile to size the problem, sanitize what is repairable, and quarantine what is not, never coercing an ambiguous value into a fabricated one.
 
-<svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The fixed three-stage repair order for a malformed OSM tag. A raw tag value is first profiled with osmium tags-count to size the problem, then passed to an idempotent sanitize stage that strips control and zero-width characters, lowercases and snake-cases the key, collapses locale numerics such as 1.200 to 1200, and harmonises units like mph to km/h. The result is then branched: a row whose required key is filled is committed to the graph build, while an unrepairable row is routed to a quarantine dead-letter partition rather than coerced." style="width:100%;max-width:1000px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The fixed three-stage repair order for a malformed OSM tag. A raw tag value is first profiled with osmium tags-count to size the problem, then passed to an idempotent sanitize stage that strips control and zero-width characters, lowercases and snake-cases the key, collapses locale numerics such as 1.200 to 1200, and harmonises units like mph to km/h. The result is then branched: a row whose required key is filled is committed to the graph build, while an unrepairable row is routed to a quarantine dead-letter partition rather than coerced." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>The profile, sanitize, branch repair order for a malformed OSM tag</title>
   <desc>A left-to-right pipeline: a raw tag value is profiled, then run through an idempotent four-step sanitizer, then branched so a repaired row commits to the graph build and an unrepairable row goes to a dashed quarantine partition.</desc>
   <defs>
@@ -36,6 +64,7 @@ The repair must be *idempotent*: running it twice produces the same output as ru
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g text-anchor="middle" fill="currentColor">
     <!-- raw tag value -->
     <rect x="18" y="128" width="112" height="64" rx="6" fill="currentColor" fill-opacity="0.05" stroke="currentColor" stroke-width="1.5"/>
@@ -207,6 +236,37 @@ def stream_and_clean(pbf_path: str, tag_cols: list[str]):
 ## Verification
 
 Confirm the repair behaved before handing rows to a graph builder:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="mal-idempotent-t mal-idempotent-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="mal-idempotent-t">Proving a sanitiser is idempotent and lossless enough to trust</title>
+  <desc id="mal-idempotent-d">A left-to-right chain of four properties to assert about a sanitiser. Idempotence: sanitising twice must equal sanitising once, or the function is not a normalisation. Stability: an already-clean value must pass through byte-identical, so clean data is untouched. Reversibility of record: the original value must be retained in a raw column even though the clean one is used. And bounded change: the share of values the sanitiser modifies should be stable release to release, so a rule change shows up as a jump.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="mid" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four properties — assert idempotence first, it fails most often</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">f(f(x)) == f(x)</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">sanitise twice</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">or it is not a normalisation</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#mid)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">clean stays identical</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">byte-for-byte</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">clean data untouched</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#mid)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">raw value retained</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">in its own column</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">the change is inspectable</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#mid)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">change rate stable</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">release to release</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">a jump means a rule moved</text>
+  <text x="868" y="158" text-anchor="end" font-size="10" fill="currentColor" opacity="0.85">Run the first two as property tests over a sample of real values from the extract, not over hand-written examples — the interesting inputs are the ones nobody would think to write.</text>
+</svg>
+<figcaption>Idempotence is the one to test first, because a non-idempotent sanitiser produces a different dataset depending on how many times a re-run happens to touch a row.</figcaption>
+</figure>
 
 - `sanitize_value` is idempotent: `sanitize_value(sanitize_value(x)) == sanitize_value(x)` for every sampled value.
 - No control or zero-width characters survive: `df.filter(pl.col("name").str.contains(r"[​﻿ ]")).height == 0`.

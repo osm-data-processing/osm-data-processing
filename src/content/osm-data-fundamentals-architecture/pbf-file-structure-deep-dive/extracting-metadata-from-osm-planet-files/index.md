@@ -23,7 +23,35 @@ OpenStreetMap metadata is not spatial data — it is the provenance layer that r
 
 You do not have to decode any of that by hand. `pyosmium` materializes the delta chains and resolves `StringTable` offsets for you, handing each callback a fully reconstructed object. The fields map directly onto the three element types of the [Node-Way-Relation data model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/), so the handler below simply reads attributes off whatever object it is given. The one decision that governs memory is whether to build a coordinate location index: metadata extraction never needs geometry, so you switch that index off and the parser stays under a couple of gigabytes even on the full planet. When the metadata layer is absent — anonymized or stripped extracts, redacted history — `uid` is `0` and `user` is the empty string, and your code must treat that as a first-class case rather than a bug.
 
-<svg viewBox="0 0 760 392" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Decode path for OSM PBF metadata: a PrimitiveBlock holds a shared StringTable, a DenseInfo message for dense nodes, and per-element Info messages for ways and relations. The uid, version, timestamp, and changeset fields are delta-encoded and accumulate across elements, while the user field is an index resolved through the StringTable, producing a flat output row of id, type, uid, user, timestamp, version, changeset, and visible." style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 322" role="img" aria-labelledby="meta-cost-t meta-cost-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="meta-cost-t">Cost of answering five questions about a planet file</title>
+  <desc id="meta-cost-d">A horizontal bar chart of wall-clock seconds. Reading the bounding box, the replication sequence and the required_features list each take about four tenths of a second because they come from the single header block. Counting objects by type takes around sixteen minutes and collecting distinct tag keys around twenty minutes, because both must decode every data block in the file.</desc>
+  <rect x="0" y="0" width="880" height="322" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Which planet-file facts come free from the header, and which need a full pass</text>
+  <text x="34" y="52" font-size="11.5" font-weight="600" fill="currentColor">cost of answering each question about an 80 GB planet file</text>
+  <line x1="220" y1="58" x2="220" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="210" y="78" text-anchor="end" font-size="11.5" fill="currentColor">bounding box</text>
+  <rect x="220" y="62" width="6" height="22" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="236" y="78" font-size="11" fill="currentColor" opacity="0.9">header bbox field — 0.4 s</text>
+  <text x="210" y="122" text-anchor="end" font-size="11.5" fill="currentColor">replication sequence</text>
+  <rect x="220" y="106" width="6" height="22" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="236" y="122" font-size="11" fill="currentColor" opacity="0.9">osmosis_replication_* — 0.4 s</text>
+  <text x="210" y="166" text-anchor="end" font-size="11.5" fill="currentColor">required_features</text>
+  <rect x="220" y="150" width="6" height="22" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="236" y="166" font-size="11" fill="currentColor" opacity="0.9">reject early if unsupported — 0.4 s</text>
+  <text x="210" y="210" text-anchor="end" font-size="11.5" fill="currentColor">object counts by type</text>
+  <rect x="220" y="194" width="414" height="22" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="644" y="210" font-size="11" fill="currentColor" opacity="0.9">every OSMData block — ~16 min</text>
+  <text x="210" y="254" text-anchor="end" font-size="11.5" fill="currentColor">distinct tag keys</text>
+  <rect x="220" y="238" width="520" height="22" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="734" y="254" font-size="11" fill="currentColor" opacity="0.9" text-anchor="end">every block plus a hash set — ~20 min</text>
+  <text x="440" y="306" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Bar length is wall-clock seconds. The first three read one block at the head of the file; the last two cannot avoid the other 79.9 GB.</text>
+</svg>
+<figcaption>The header is a free index card. Anything it does not answer costs a full decode of the file, so it is worth checking the card before starting the pass.</figcaption>
+</figure>
+
+<svg viewBox="0 0 760 392" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Decode path for OSM PBF metadata: a PrimitiveBlock holds a shared StringTable, a DenseInfo message for dense nodes, and per-element Info messages for ways and relations. The uid, version, timestamp, and changeset fields are delta-encoded and accumulate across elements, while the user field is an index resolved through the StringTable, producing a flat output row of id, type, uid, user, timestamp, version, changeset, and visible." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>How pyosmium decodes PBF metadata into a flat row</title>
   <desc>Inside one PrimitiveBlock, dense nodes store metadata in a DenseInfo message and ways and relations store it in per-element Info messages. The uid, version, timestamp, and changeset values are delta-encoded, so each element adds a signed delta to the previous running value (for example uid 1042 then +3 then minus 5 yields 1042, 1045, 1040). The user field is not stored inline; it is a user_sid index into the block-level StringTable, where index 0 is the empty string that signals an anonymized edit. libosmium materialises both — accumulating the deltas and dereferencing the StringTable — to hand the handler a fully reconstructed object, which is emitted as a flat row of id, type, uid, user, timestamp, version, changeset, and visible.</desc>
   <defs>
@@ -31,6 +59,7 @@ You do not have to decode any of that by hand. `pyosmium` materializes the delta
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="392" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- Column 1: PrimitiveBlock -->
   <rect x="14" y="40" width="210" height="320" rx="6" fill="currentColor" fill-opacity="0.04" stroke="currentColor" stroke-width="1.5"/>
   <text x="119" y="60" text-anchor="middle" font-size="13" fill="currentColor" font-weight="bold">PrimitiveBlock</text>
@@ -198,6 +227,44 @@ if __name__ == "__main__":
 5. **Timestamp normalization** — `obj.timestamp` is a timezone-aware datetime; `isoformat()` yields an unambiguous UTC ISO 8601 string, and a `None` timestamp (possible in stripped extracts) degrades to an empty field instead of raising.
 6. **Batched writes** — rows accumulate in `self.buffer` and flush every `batch_size` primitives, amortizing I/O while keeping the live buffer bounded; the final partial batch is flushed after `apply_file` returns.
 7. **`visible` semantics** — the field is always `True` in regular planet files (deleted elements are absent), and only varies in historical `.osh.pbf` files where deletions are recorded as `visible=False`.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 860 262" role="img" aria-labelledby="hdr-map-t hdr-map-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="hdr-map-t">The OSMHeader fields grouped by the decision each one drives</title>
+  <desc id="hdr-map-d">Three grouped panels. Gate the run: required_features must abort on an unknown entry, optional_features only logs one, and writingprogram identifies the producer and its quirks. Place it in space: the bounding box left, right, top and bottom fields are nanodegrees and may be absent, which must be read as unknown rather than empty, and can be used to skip out-of-area files. Place it in time: the osmosis replication timestamp, sequence number and base URL give the file age, the resume point for a diff stream, and which stream it belongs to, all three optional.</desc>
+  <rect x="0" y="0" width="860" height="262" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="hdrm" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">OSMHeader fields and what a pipeline should do with each</text>
+  <rect x="26" y="48" width="250" height="196" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="151" y="72" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">gate the run</text>
+  <text x="40" y="98" font-size="11" font-family="monospace" fill="currentColor">required_features[]</text>
+  <text x="40" y="116" font-size="10.5" fill="currentColor" opacity="0.85">unknown entry → refuse to parse</text>
+  <text x="40" y="142" font-size="11" font-family="monospace" fill="currentColor">optional_features[]</text>
+  <text x="40" y="160" font-size="10.5" fill="currentColor" opacity="0.85">unknown entry → parse, log it</text>
+  <text x="40" y="186" font-size="11" font-family="monospace" fill="currentColor">writingprogram</text>
+  <text x="40" y="204" font-size="10.5" fill="currentColor" opacity="0.85">osmium · osmosis · planet dump</text>
+  <text x="40" y="228" font-size="10.5" fill="currentColor" opacity="0.85">tells you which quirks to expect</text>
+  <rect x="292" y="48" width="250" height="196" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="417" y="72" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">place it in space</text>
+  <text x="306" y="98" font-size="11" font-family="monospace" fill="currentColor">bbox.left / right</text>
+  <text x="306" y="116" font-size="11" font-family="monospace" fill="currentColor">bbox.top / bottom</text>
+  <text x="306" y="140" font-size="10.5" fill="currentColor" opacity="0.85">nanodegrees, not degrees</text>
+  <text x="306" y="166" font-size="10.5" fill="currentColor" opacity="0.85">absent in some extracts —</text>
+  <text x="306" y="184" font-size="10.5" fill="currentColor" opacity="0.85">treat missing as &#8220;unknown&#8221;,</text>
+  <text x="306" y="202" font-size="10.5" fill="currentColor" opacity="0.85">never as &#8220;empty&#8221;</text>
+  <text x="306" y="228" font-size="10.5" fill="currentColor" opacity="0.85">use it to skip out-of-area files</text>
+  <rect x="558" y="48" width="276" height="196" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="696" y="72" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">place it in time</text>
+  <text x="572" y="98" font-size="11" font-family="monospace" fill="currentColor">osmosis_replication_timestamp</text>
+  <text x="572" y="116" font-size="10.5" fill="currentColor" opacity="0.85">epoch seconds — the file&#8217;s age</text>
+  <text x="572" y="142" font-size="11" font-family="monospace" fill="currentColor">osmosis_replication_sequence_number</text>
+  <text x="572" y="160" font-size="10.5" fill="currentColor" opacity="0.85">where to resume a diff stream</text>
+  <text x="572" y="186" font-size="11" font-family="monospace" fill="currentColor">osmosis_replication_base_url</text>
+  <text x="572" y="204" font-size="10.5" fill="currentColor" opacity="0.85">which stream it belongs to</text>
+  <text x="572" y="228" font-size="10.5" fill="currentColor" opacity="0.85">all three optional — check before use</text>
+</svg>
+<figcaption>Grouping the header by decision rather than by field order makes the omissions obvious: a file with no replication sequence cannot be caught up, and one with no bbox cannot be spatially skipped.</figcaption>
+</figure>
 
 ## Verification
 

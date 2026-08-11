@@ -31,11 +31,20 @@ description: "Engineer production OSM data pipelines: PBF/XML parsing, tag norma
       </p>
       <p>
         The content spans four tracks: a <a href="{{ site.url }}{{ site.sections[0].url }}">data fundamentals track</a>
-        covering the OSM schema and serialization formats, a <a href="{{ site.url }}{{ site.sections[1].url }}">parsing and
-        normalization track</a> covering ingestion and routing-graph conversion, a
-        <a href="{{ site.url }}{{ site.sections[2].url }}">replication and diff-sync track</a> for keeping local data current
-        with upstream change files, and a <a href="{{ site.url }}{{ site.sections[3].url }}">data quality and validation
-        track</a> for rule-driven QA.
+        covering the OSM schema, serialization formats and
+        <a href="{{ site.url }}/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/">extract clipping</a>;
+        a <a href="{{ site.url }}{{ site.sections[1].url }}">parsing and normalization track</a> covering ingestion,
+        routing-graph conversion and
+        <a href="{{ site.url }}/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/">export to GeoParquet and PostGIS</a>;
+        a <a href="{{ site.url }}{{ site.sections[2].url }}">replication and diff-sync track</a> for keeping local data current
+        with upstream change files and
+        <a href="{{ site.url }}/osm-replication-diff-sync/replication-monitoring-and-lag-alerting/">monitoring how far behind you are</a>;
+        and a <a href="{{ site.url }}{{ site.sections[3].url }}">data quality and validation track</a> covering rule-driven QA and
+        <a href="{{ site.url }}/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/">changeset analysis</a>.
+      </p>
+      <p class="hero__stat">
+        {{ collections.contentPages.length }} in-depth pages across four sections — every one carrying worked code,
+        hand-drawn diagrams and a light and dark reading mode.
       </p>
     </div>
     <div class="hero__ctas">
@@ -93,6 +102,18 @@ description: "Engineer production OSM data pipelines: PBF/XML parsing, tag norma
       <div>
         <h3>Quality assurance</h3>
         <p>Error isolation, structured logging, quarantine workflows, automated tag taxonomy validation, and ODbL compliance checks.</p>
+      </div>
+      <div>
+        <h3>Extracts &amp; boundaries</h3>
+        <p>Cutting regions out of a planet file without shredding the reference graph: .poly boundaries, the four osmium strategies, and one-pass multi-region splits.</p>
+      </div>
+      <div>
+        <h3>Export &amp; storage</h3>
+        <p>Landing normalised features where consumers read them: GeoParquet schema and partitioning, osm2pgsql flex tables, and keeping the two sinks consistent.</p>
+      </div>
+      <div>
+        <h3>Operations &amp; edit safety</h3>
+        <p>Replication lag signals and alert thresholds that survive a normal day, plus changeset scoring that ranks suspicious edits for a human rather than reverting them.</p>
       </div>
     </div>
   </div>

@@ -11,7 +11,7 @@ date: 2026-06-26
 ---
 # Node-Way-Relation Data Model
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 620" style="width:100%;max-width:1040px;display:block;margin:1.5rem auto" role="img" aria-label="Entity diagram of the OSM data model. Three primitives — Node, Way, and Relation — each carry an id, a tag map, and a Metadata block. A Way aggregates an ordered list of Node references; a Relation aggregates typed Members; and each Member's ref resolves to a Node, Way, or Relation.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 620" style="width:100%;max-width:100%;display:block;margin:1.5rem auto" role="img" aria-label="Entity diagram of the OSM data model. Three primitives — Node, Way, and Relation — each carry an id, a tag map, and a Metadata block. A Way aggregates an ordered list of Node references; a Relation aggregates typed Members; and each Member's ref resolves to a Node, Way, or Relation.">
   <title>OSM node, way, and relation data model</title>
   <desc>Node holds id, lat, lon and tags. Way holds id, an ordered node_refs list and tags. Relation holds id, a members list and tags. Member holds a type (node, way or relation), a ref id and a role such as outer or inner. Metadata holds version, timestamp, changeset and uid and is owned by every primitive. A Way aggregates ordered Node references, a Relation aggregates typed Members, and each Member reference resolves to a Node, Way or Relation.</desc>
   <defs>
@@ -19,6 +19,7 @@ date: 2026-06-26
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1040" height="620" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="520" y="26" text-anchor="middle" font-size="15" font-family="inherit" fill="currentColor" font-weight="700">OSM data model: three primitives, references, and shared metadata</text>
   <!-- Node -->
   <rect x="30" y="48" width="280" height="150" rx="8" fill="none" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -175,7 +176,7 @@ handler.apply_file("extract.pbf", locations=True)
 
 Untagged nodes frequently act as geometric anchors for ways and relations. Retain every valid node during reconstruction even when it carries no tags; feature-extraction stages may filter the orphans afterward to shrink storage and speed up spatial joins.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto" role="img" aria-label="Three-stage OSM resolution pipeline. A node index mapping id to latitude and longitude feeds way reconstruction, which turns ordered references into a LineString or Polygon; that feeds relation assembly, which turns members and roles into a MultiPolygon, emitting valid geometry. A reference-closure gate beneath the ways and relations stages tests whether every reference resolves and routes unresolved references to a quarantine table instead of silently dropping them.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" style="width:100%;max-width:100%;display:block;margin:1.5rem auto" role="img" aria-label="Three-stage OSM resolution pipeline. A node index mapping id to latitude and longitude feeds way reconstruction, which turns ordered references into a LineString or Polygon; that feeds relation assembly, which turns members and roles into a MultiPolygon, emitting valid geometry. A reference-closure gate beneath the ways and relations stages tests whether every reference resolves and routes unresolved references to a quarantine table instead of silently dropping them.">
   <title>Three-stage resolution pipeline with a reference-closure gate</title>
   <desc>Stage 1 builds a node index from id to (lat, lon). Stage 2 reconstructs ways, turning ordered node references into a LineString or area-tagged Polygon. Stage 3 assembles relations, turning members and roles into a MultiPolygon. Valid geometry flows on to tag normalization. A reference-closure gate beneath stages 2 and 3 asks whether every reference resolves; references that do not resolve are dropped, counted, and written to a quarantine table for re-clipping rather than corrupting downstream geometry.</desc>
   <defs>
@@ -183,6 +184,7 @@ Untagged nodes frequently act as geometric anchors for ways and relations. Retai
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="340" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="24" text-anchor="middle" font-size="14" font-family="inherit" fill="currentColor" font-weight="700">Index nodes → reconstruct ways → assemble relations, gated by reference closure</text>
   <!-- Stage 1: node index -->
   <rect x="24" y="46" width="212" height="100" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -330,6 +332,30 @@ Each defect class has a distinct root cause, detection method, and remediation. 
 ## Performance & Scale Considerations
 
 The cost center is the node index. A planet extract holds roughly nine billion nodes; an in-memory `dict[int, tuple]` of that size is impossible on commodity hardware. For continental and global runs, replace the Python dictionary with an on-disk node-location store — `pyosmium`'s `index.create_map("sparse_file_array,nodes.cache")` or a memory-mapped flat array keyed by node ID. This trades a few microseconds per lookup for a flat, predictable memory ceiling instead of unbounded heap growth.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 262" role="img" aria-labelledby="node-cache-t node-cache-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="node-cache-t">Peak memory of four node-location cache strategies on a 412 million node extract</title>
+  <desc id="node-cache-d">A horizontal bar chart of peak resident memory. A Python dict costs about 104 bytes per node, 41 GB for a country extract, with constant-time lookup. Sorted numpy arrays cost 20 bytes per node, 7.9 GB, with logarithmic searchsorted lookup. An osmium dense node cache costs 8 bytes per identifier slot, is memory-mapped, constant time, and spills to disk. An LMDB key-value store keeps resident memory bounded at about four microseconds per lookup and survives a restart.</desc>
+  <rect x="0" y="0" width="880" height="262" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four ways to answer &#8220;where is node 240 million?&#8221; — pick by extract size</text>
+  <line x1="196" y1="46" x2="196" y2="248" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="186" y="72" text-anchor="end" font-size="11.5" font-weight="600" fill="currentColor">Python dict</text>
+  <rect x="196" y="58" width="590" height="20" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="206" y="73" font-size="10.5" fill="currentColor">≈ 104 bytes/node · 41 GB for a country · O(1) lookup</text>
+  <text x="186" y="116" text-anchor="end" font-size="11.5" font-weight="600" fill="currentColor">sorted numpy arrays</text>
+  <rect x="196" y="102" width="196" height="20" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="206" y="117" font-size="8" fill="currentColor">20 bytes/node · 7.9 GB · O(log n) searchsorted</text>
+  <text x="186" y="160" text-anchor="end" font-size="11.5" font-weight="600" fill="currentColor">osmium node cache (dense)</text>
+  <rect x="196" y="146" width="118" height="20" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="322" y="161" font-size="10.5" fill="currentColor">8 bytes/id slot · mmap&#8217;d, O(1), spills to disk</text>
+  <text x="186" y="204" text-anchor="end" font-size="11.5" font-weight="600" fill="currentColor">LMDB / on-disk KV</text>
+  <rect x="196" y="190" width="60" height="20" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="264" y="205" font-size="10.5" fill="currentColor">bounded RAM · ~4 µs/lookup · survives a restart</text>
+  <text x="440" y="238" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Bar length is peak resident memory for a 412 M-node extract. The dict is the only one that cannot be made to fit.</text>
+</svg>
+<figcaption>Reference resolution is a memory problem before it is an algorithm problem. Each step down this list trades a little latency for an order of magnitude of headroom.</figcaption>
+</figure>
 
 Reconstruction is embarrassingly parallel once nodes are indexed, because each way and each relation resolves independently. Split work by primitive-group block boundaries (which the binary format already aligns for you) and fan out to a process pool; the node store is read-only at this stage, so workers can share a memory-mapped view without locking. In practice a buffered, block-aligned reader sustains hundreds of thousands of ways per second per core, and the bottleneck shifts from CPU to the random-access pattern of node lookups — which is why store locality, not parser speed, dominates wall-clock time on large extracts.
 

@@ -5,7 +5,7 @@ pageDescription: "Decode and validate the OSMHeader blob of an OSM PBF file in P
 
 Decode the leading `OSMHeader` blob of a `.osm.pbf` file in Python to validate `required_features` and read the bounding box before you stream a single data block — getting this pre-flight step right is what stops an incompatible or corrupt extract from silently poisoning everything downstream.
 
-<svg viewBox="0 0 700 548" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Byte-level decode pipeline for the OSMHeader blob. The .osm.pbf byte stream begins with a 4-byte big-endian uint32 length prefix read by struct.unpack, guarded against the 64 KiB BlobHeader ceiling. That gives the BlobHeader, whose type must equal OSMHeader and whose datasize is guarded against the 32 MiB payload ceiling. Reading datasize bytes yields the Blob, which sets exactly one of zlib_data, raw or lzma_data. zlib.decompress turns it into the HeaderBlock carrying required_features, the nanodegree bbox, and osmosis replication provenance." style="width:100%;max-width:700px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 700 548" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Byte-level decode pipeline for the OSMHeader blob. The .osm.pbf byte stream begins with a 4-byte big-endian uint32 length prefix read by struct.unpack, guarded against the 64 KiB BlobHeader ceiling. That gives the BlobHeader, whose type must equal OSMHeader and whose datasize is guarded against the 32 MiB payload ceiling. Reading datasize bytes yields the Blob, which sets exactly one of zlib_data, raw or lzma_data. zlib.decompress turns it into the HeaderBlock carrying required_features, the nanodegree bbox, and osmosis replication provenance." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Decoding the OSMHeader blob byte by byte</title>
   <desc>A vertical pipeline: the .osm.pbf byte stream is read as a 4-byte big-endian uint32 length prefix (raw framing, guarded at 64 KiB), then parsed into a BlobHeader whose type must equal OSMHeader and whose datasize is guarded at 32 MiB, then datasize bytes are read into a Blob with exactly one of zlib_data, raw or lzma_data set, then zlib.decompress produces the HeaderBlock holding required_features, the nanodegree bbox, and osmosis replication provenance fields.</desc>
   <defs>
@@ -13,6 +13,7 @@ Decode the leading `OSMHeader` blob of a `.osm.pbf` file in Python to validate `
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="700" height="548" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g text-anchor="middle" fill="currentColor">
     <!-- 0: byte stream -->
     <rect x="100" y="16" width="270" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -74,6 +75,39 @@ Decode the leading `OSMHeader` blob of a `.osm.pbf` file in Python to validate `
 ## What the header actually is
 
 A `.osm.pbf` file is a sequence of length-prefixed blocks, and the very first one is always a single `OSMHeader` blob. As the [PBF File Structure Deep Dive](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/) sets out, every block is framed identically: a 4-byte big-endian `uint32` giving the `BlobHeader` length, the `BlobHeader` message itself, then the compressed `Blob` payload whose size lives in `BlobHeader.datasize`. The header's `Blob`, once decompressed, deserializes into a `HeaderBlock` — and that block is the contract for the rest of the file.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 860 244" role="img" aria-labelledby="hdr-bytes-t hdr-bytes-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="hdr-bytes-t">Byte-level walk from the file start to a decoded HeaderBlock</title>
+  <desc id="hdr-bytes-d">Four steps left to right. The first four bytes, big-endian, give the BlobHeader length, here thirteen, and are read with struct.unpack rather than protobuf. The next thirteen bytes are the BlobHeader protobuf carrying a type of OSMHeader and a datasize. The next datasize bytes are the Blob holding zlib data. Inflating it gives the HeaderBlock with bounding box, feature lists and replication fields, and the inflated length must equal the declared raw size. A panel warns that a short read from a socket or pipe must be looped over, or the next length prefix will be read from the middle of a blob.</desc>
+  <rect x="0" y="0" width="860" height="244" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Reading the length prefix: the one field that is <tspan font-style="italic">not</tspan> protobuf</text>
+  <rect x="34" y="56" width="126" height="46" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.4"/>
+  <text x="97" y="76" text-anchor="middle" font-size="11" font-family="monospace" fill="currentColor">00 00 00 0D</text>
+  <text x="97" y="94" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">4-byte big-endian</text>
+  <text x="97" y="122" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor">= 13</text>
+  <text x="97" y="140" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">struct.unpack("&gt;I")</text>
+  <rect x="184" y="56" width="230" height="46" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.4"/>
+  <text x="299" y="76" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor">0A 09 4F 53 4D 48 65 61 64 65 72 …</text>
+  <text x="299" y="94" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">13 bytes of BlobHeader protobuf</text>
+  <text x="299" y="122" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor">type = "OSMHeader", datasize = N</text>
+  <text x="299" y="140" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">BlobHeader.FromString(buf)</text>
+  <rect x="438" y="56" width="176" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="526" y="76" text-anchor="middle" font-size="11" font-family="monospace" fill="currentColor">next N bytes</text>
+  <text x="526" y="94" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">the Blob itself</text>
+  <text x="526" y="122" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor">zlib_data</text>
+  <text x="526" y="140" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">zlib.decompress(...)</text>
+  <rect x="638" y="56" width="196" height="46" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.4"/>
+  <text x="736" y="76" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">HeaderBlock</text>
+  <text x="736" y="94" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">bbox · features · replication</text>
+  <text x="736" y="122" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor">raw_size must match</text>
+  <text x="736" y="140" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">len(inflated) == raw_size</text>
+  <rect x="34" y="164" width="800" height="62" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.4"/>
+  <text x="434" y="188" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">The failure that looks like a corrupt file but is not</text>
+  <text x="828" y="210" text-anchor="end" font-size="9" fill="currentColor" opacity="0.9">A socket or pipe read can return fewer bytes than you asked for. Loop until you have all four, then all thirteen, then all N — or the next length prefix is read from the middle of a blob.</text>
+</svg>
+<figcaption>The length prefix is deliberately not protobuf: it has to be readable before you know how much to read. Everything after it is, which is why a single short read desynchronises the whole stream.</figcaption>
+</figure>
 
 The fields you must read are `required_features` (capabilities your parser is obligated to implement, typically `OsmSchema-V0.6` and `DenseNodes`), the `bbox` bounding box stored in nanodegrees, and the `osmosis_replication_*` provenance fields. Because PBF stores coordinates as scaled integers rather than floats — a detail covered under [Coordinate Reference Systems in OSM](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/) — every `bbox` edge must be converted with $\text{degrees} = \text{nanodegrees} \times 10^{-9}$ before it means anything in WGS 84. That is the entire conceptual surface; the rest is binary framing and one decompression call.
 
@@ -215,6 +249,39 @@ if __name__ == "__main__":
 4. **Decompress by field, not by guess.** `_decompress_header_blob` inspects which payload field is set with `HasField`. The fields are mutually exclusive; `zlib_data` covers the overwhelming majority of real extracts, with `raw` and `lzma_data` as fallbacks. The decompressed bytes deserialize straight into a `HeaderBlock`.
 5. **Convert the bounding box.** `extract_bounding_box` multiplies each nanodegree edge by $10^{-9}$. Skipping this step produces a systematic $10^{9}\times$ offset, so coordinates land nowhere near the source region.
 6. **Gate on `required_features`.** `validate_header` subtracts your supported set from the file's `required_features`; a non-empty remainder is a hard stop, because honouring an unimplemented feature like `DenseNodes` is the difference between correct geometry and silently misread nodes — the same primitive graph described in the [Node-Way-Relation Data Model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/).
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="reqfeat-t reqfeat-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="reqfeat-t">How a reader should respond to each declared PBF feature string</title>
+  <desc id="reqfeat-d">A grid mapping four feature strings against the required and optional lists. OsmSchema-V0.6 and DenseNodes are understood and safe to parse in either list. HistoricalInformation in the required list means the file holds multiple versions per object and a snapshot reader must abort; in the optional list it can be parsed with a warning. An unknown future string must abort when required and only be logged when optional.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">required_features aborts, optional_features only warns</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">in required_features</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">in optional_features</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">OsmSchema-V0.6</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">parse — understood</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">parse — understood</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">DenseNodes</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">parse — understood</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">parse — understood</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">HistoricalInformation</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">abort: not a snapshot</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">parse, warn on dupes</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">unknown future string</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">abort: meaning unknown</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">parse, log the string</text>
+  <text x="868" y="260" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">A snapshot pipeline that ignores a required HistoricalInformation flag will silently emit every historical version of every object as if it were current.</text>
+</svg>
+<figcaption>The asymmetry is the whole point of two lists. <code>required_features</code> is the file telling you that ignoring it changes the meaning of the data; <code>optional_features</code> is telling you it does not.</figcaption>
+</figure>
 
 ## Verification
 

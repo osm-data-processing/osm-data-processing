@@ -29,9 +29,37 @@ Verify each item before running the module below; the queue bound is the only th
 
 A PBF file is a sequence of independent, zlib-compressed fileblocks. Decoding one block is CPU work; whatever happens to the decoded features afterward — reprojection, tag canonicalization, an insert — is usually slower and often I/O-bound. If you decode in a tight loop and append every result to a list, the decoder finishes the file long before the consumer drains it, and peak memory grows to hold the *entire* backlog. The fix is not a faster consumer; it is a channel that refuses to accept more work than the consumer can take. A bounded [asyncio](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/) queue is exactly that channel: `await queue.put(block)` suspends the producer coroutine the moment the queue is full, and only resumes it once the consumer calls `queue.get()` and frees a slot. That suspension *is* backpressure — the producer's rate is clamped to the consumer's rate, and the in-flight set never exceeds `maxsize`.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="queue-backpressure-t queue-backpressure-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="queue-backpressure-t">What queue depth does to memory and to producer behaviour</title>
+  <desc id="queue-backpressure-d">A bar chart of peak resident memory against asyncio queue maxsize for a block-streaming pipeline. An unbounded queue reaches 11.4 gigabytes because the producer never waits. A maxsize of 256 reaches 1.9 gigabytes. A maxsize of 32 reaches 310 megabytes. A maxsize of 4 reaches 78 megabytes but leaves consumers idle 12 percent of the time. A maxsize of 1 reaches 41 megabytes with consumers idle 34 percent of the time.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The queue bound is the only backpressure in the pipeline</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">peak resident memory by asyncio queue maxsize, block streaming a 1.2 GB PBF</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">unbounded</text>
+  <rect x="250" y="74" width="453" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="713" y="89" font-size="11" fill="currentColor" opacity="0.9">11.4 GB · producer never waits</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">maxsize=256</text>
+  <rect x="250" y="116" width="75" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="335" y="131" font-size="11" fill="currentColor" opacity="0.9">1.9 GB · consumers never idle</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">maxsize=32</text>
+  <rect x="250" y="158" width="13" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="273" y="173" font-size="11" fill="currentColor" opacity="0.9">310 MB · consumers idle 2%</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">maxsize=4</text>
+  <rect x="250" y="200" width="6" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="266" y="215" font-size="11" fill="currentColor" opacity="0.9">78 MB · consumers idle 12%</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">maxsize=1</text>
+  <rect x="250" y="242" width="6" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="266" y="257" font-size="11" fill="currentColor" opacity="0.9">41 MB · consumers idle 34%</text>
+  <text x="440" y="306" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Size the queue at a small multiple of the consumer count. Two to four blocks per consumer keeps them fed without buffering the file.</text>
+</svg>
+<figcaption>The queue bound is the backpressure. Unbounded means the fast producer converts the whole file into resident memory; too small means the consumers wait on it.</figcaption>
+</figure>
+
 Two details make this correct rather than merely plausible. First, decoding a block with osmium is a *blocking* call that would stall the entire event loop if run inline; it must execute in a thread or process pool via `loop.run_in_executor`, so the loop stays free to service `put`/`get` handoffs. Second, the consumer needs an unambiguous end-of-stream signal. A queue has no built-in "closed" state, so the producer enqueues a `None` sentinel after the last block, and the consumer treats that sentinel as its cue to stop — one sentinel per consumer, so every worker gets released.
 
-<svg viewBox="0 0 760 320" role="img" aria-label="A producer coroutine decodes PBF fileblocks in a thread-pool executor and pushes each decoded block into a bounded asyncio queue of four slots; three slots are occupied so one remains free, and when all slots fill the producer's put call suspends, which is backpressure. Two consumer coroutines each call get to pull a block, process it against a slower downstream sink, and mark the task done. After the last block the producer enqueues one None sentinel per consumer to stop each worker cleanly." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 760 320" role="img" aria-label="A producer coroutine decodes PBF fileblocks in a thread-pool executor and pushes each decoded block into a bounded asyncio queue of four slots; three slots are occupied so one remains free, and when all slots fill the producer's put call suspends, which is backpressure. Two consumer coroutines each call get to pull a block, process it against a slower downstream sink, and mark the task done. After the last block the producer enqueues one None sentinel per consumer to stop each worker cleanly." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Bounded asyncio queue between a PBF block producer and two consumers</title>
   <desc>A producer coroutine runs blocking block decode in a thread-pool executor and pushes each decoded block onto a bounded asyncio queue with four slots, three occupied and one free. When the queue is full the producer's put call suspends, applying backpressure. Two consumer coroutines each call get, process the block against a slower downstream sink, and call task_done. A None sentinel per consumer signals end of stream.</desc>
   <defs>
@@ -39,6 +67,7 @@ Two details make this correct rather than merely plausible. First, decoding a bl
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- producer -->
   <rect x="20" y="118" width="150" height="72" rx="6" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-width="1.5"/>
   <text x="95" y="142" text-anchor="middle" font-size="12.5" fill="currentColor">Producer</text>
@@ -210,6 +239,34 @@ Confirm the stream behaves before wiring it to a real sink:
 | One worker does all the work | Sentinel handled before siblings released | Send one sentinel per consumer, not a single shared one. |
 | `Task was destroyed but pending` | Producer/consumer task not awaited | `await asyncio.gather(prod, *workers)` before returning. |
 | Silent stall, no error surfaced | Producer raised; consumers block on `get()` | Gather the producer so its exception propagates. |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="queue-err-t queue-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="queue-err-t">Three asyncio queue mistakes that hang or silently truncate a pipeline</title>
+  <desc id="queue-err-d">A grid of three mistakes with symptom and fix. Never sending a sentinel means consumers await forever after the last block and the program hangs at exit, fixed by sending one sentinel per consumer. Not awaiting queue join before cancelling means work in flight is discarded and the output is short, fixed by joining before cancelling. Swallowing exceptions inside a consumer task means a failure vanishes and the run reports success on partial output, fixed by gathering with return_exceptions and re-raising.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three ways an async pipeline exits zero with the wrong output</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">symptom</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">fix</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">no sentinel sent</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">hangs at exit, no error</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">one sentinel per consumer</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">cancelled before join</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">output silently short</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">await queue.join() first</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">consumer exception swallowed</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">success reported on partial data</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">gather(..., return_exceptions=True), re-raise</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Assert the object count against the file header before declaring a run successful — it catches all three from the outside.</text>
+</svg>
+<figcaption>All three end with a program that exits zero. Two produce truncated output and one produces none, and nothing in the logs distinguishes them from success.</figcaption>
+</figure>
 
 ## Specification reference
 

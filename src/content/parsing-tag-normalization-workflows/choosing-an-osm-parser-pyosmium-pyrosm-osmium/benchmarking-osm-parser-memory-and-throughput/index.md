@@ -29,9 +29,43 @@ Tick each box before running the harness; a skipped one is the usual reason two 
 
 Two numbers decide a parser: how much memory it needs at its worst moment, and how fast it turns bytes into elements. The worst-moment figure is *peak* resident set size, and the operating system already tracks it for you — `resource.getrusage(resource.RUSAGE_SELF).ru_maxrss` returns a high-water mark that only ever climbs during a process's life. That property is a gift and a trap: because it never decreases, running pyosmium and pyrosm in the *same* process would report the maximum of the two, hiding the very difference you are trying to see. The fix is to run each parser in its own fresh process and read the high-water mark there. Throughput is simpler — wrap the parse in `time.perf_counter()`, count the elements consumed, and divide. The one subtlety is fairness: the first parser warms the operating system's page cache, so the second reads from RAM instead of disk and looks faster than it is. This page is the empirical companion to the decision guide in [choosing an OSM parser](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/choosing-an-osm-parser-pyosmium-pyrosm-osmium/), which explains *why* the two readers scale differently; here we quantify it.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" role="img" aria-label="A memory-versus-time chart of a single parser run. Resident memory rises from a low baseline as the parse proceeds and plateaus near a peak. A dashed horizontal line marks that peak, labelled ru_maxrss, the high-water mark that only ever increases and never falls back down. Two dashed vertical lines mark t0 at the start and t1 at the end of the parse; the span between them, measured by perf_counter, is the elapsed time. A caption states the two metrics captured per run: peak RSS equals ru_maxrss, and throughput equals elements divided by elapsed." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit;">
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="bench-traps-t bench-traps-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="bench-traps-t">Four things that make an OSM parser benchmark meaningless</title>
+  <desc id="bench-traps-d">A grid of four benchmark mistakes against what the number ends up measuring. Not dropping the page cache between runs measures the page cache, not the parser. Running each tool once measures scheduler noise. Comparing a tag-only pass against a geometry-building pass measures different work. And benchmarking on a city extract measures startup cost, because the fixed overhead dominates a two-second run.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four ways to produce a confident, meaningless number</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what you are really measuring</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">fix</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">page cache not dropped</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">the page cache</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">drop caches, or read a fresh file each run</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">single run per tool</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">scheduler noise</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">5+ runs, report the median</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">different work compared</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">two different jobs</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">fix the output, vary only the tool</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">extract too small</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">process startup</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">use a country extract, 60 s+ runs</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Publish the command lines with the numbers. A benchmark nobody can re-run is an opinion with decimal places.</text>
+</svg>
+<figcaption>Each of these produces a confident number that answers a different question from the one asked. The page cache one is the most common and typically inflates the second tool measured.</figcaption>
+</figure>
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" role="img" aria-label="A memory-versus-time chart of a single parser run. Resident memory rises from a low baseline as the parse proceeds and plateaus near a peak. A dashed horizontal line marks that peak, labelled ru_maxrss, the high-water mark that only ever increases and never falls back down. Two dashed vertical lines mark t0 at the start and t1 at the end of the parse; the span between them, measured by perf_counter, is the elapsed time. A caption states the two metrics captured per run: peak RSS equals ru_maxrss, and throughput equals elements divided by elapsed." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>How the harness captures peak RSS and throughput from one parser run</title>
   <desc>Resident memory rises and plateaus over a run; a dashed line marks the ru_maxrss high-water peak. Vertical markers t0 and t1 bound the perf_counter elapsed time. Peak RSS is ru_maxrss; throughput is elements divided by elapsed time.</desc>
+  <rect x="0" y="0" width="900" height="400" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="450" y="26" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Two numbers per run: the memory peak and the wall-clock rate</text>
   <!-- axes -->
   <line x1="120" y1="60" x2="120" y2="300" stroke="currentColor" stroke-width="1.5"/>
@@ -174,6 +208,37 @@ For a live memory trace rather than only the final peak, sample `psutil.Process(
 ## Verification
 
 Confirm the harness measured what you think before trusting the ranking:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="bench-report-t bench-report-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="bench-report-t">What a reproducible parser benchmark has to record alongside the timings</title>
+  <desc id="bench-report-d">A left-to-right chain of four things a benchmark must record to be reproducible. The input: file URL, size and SHA-256, because extracts change weekly. The environment: CPU model, core count, memory and storage type. The versions: library, libosmium and Python versions. And the method: run count, whether caches were dropped, and which statistic is reported. Without all four a later reader cannot tell whether a different result is a regression or a different machine.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="bmr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four records, or the numbers cannot be compared to anything</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">the input</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">URL · size · SHA-256</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">extracts change weekly</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#bmr)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">the machine</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">CPU · cores · RAM · disk</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">NVMe vs network storage</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#bmr)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">the versions</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">library · libosmium · Python</text>
+  <text x="546" y="122" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.8">decode speed moves between releases</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#bmr)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">the method</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">runs · caches · statistic</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">median, not best</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Commit this block next to the results as a small YAML file. It is the difference between a benchmark and an anecdote.</text>
+</svg>
+<figcaption>The one people omit is the input hash, and it is the one that matters most — a Geofabrik extract downloaded a week later is a different file with different content.</figcaption>
+</figure>
 
 - **Peaks must differ.** pyosmium's peak RSS should be a small fraction of pyrosm's on the same extract; if they are near-identical, you are almost certainly measuring in one process — check that `spawn` is in effect.
 - **Element counts should be the same order of magnitude.** pyrosm's `network_type="all"` count will not match pyosmium's total-primitive count exactly (pyrosm filters to the network), but a 1000× gap means the read pulled the wrong feature set.

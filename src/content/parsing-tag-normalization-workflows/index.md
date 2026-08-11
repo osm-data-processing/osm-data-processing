@@ -11,7 +11,7 @@ date: 2026-06-26
 ---
 # Parsing & Tag Normalization Workflows
 
-<svg viewBox="0 0 700 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vertical data-flow diagram of an OSM parsing and tag-normalization pipeline, from a raw PBF or XML extract through streaming parse, memory-bounded chunks, tag extraction, value standardization, and a validation gate that routes valid features to topology assembly and downstream stores while defective features divert to a quarantine queue" style="width:100%;max-width:700px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 700 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vertical data-flow diagram of an OSM parsing and tag-normalization pipeline, from a raw PBF or XML extract through streaming parse, memory-bounded chunks, tag extraction, value standardization, and a validation gate that routes valid features to topology assembly and downstream stores while defective features divert to a quarantine queue" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>OSM Parsing &amp; Tag Normalization Data Flow</title>
   <desc>A raw PBF or XML extract feeds an async streaming parser (pyrosm or pyosmium), which emits memory-bounded chunks. Tag extraction and schema alignment produce typed fields, then value standardization applies regex cleaning and unit conversion. A validation gate splits the flow: valid features pass down to topology assembly and routing-graph construction and then to downstream stores such as GeoParquet or a graph database, while defective features divert right into a quarantine or dead-letter queue.</desc>
   <defs>
@@ -19,6 +19,7 @@ date: 2026-06-26
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="700" height="660" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- B1 source -->
   <rect x="100" y="20" width="260" height="52" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
   <text x="230" y="51" text-anchor="middle" font-size="13" fill="currentColor">Raw PBF / XML extract</text>
@@ -77,6 +78,42 @@ Every primitive additionally carries a free-form dictionary of string key-value 
 ## Data ingestion & parsing architecture
 
 The initial phase extracts nodes, ways, and relations from compressed Protocol Buffer Binary Format (PBF) or XML extracts. Raw OSM extracts are sparse and topologically interdependent, so parsers must maintain referential integrity while minimizing I/O overhead. Production systems decouple disk reads from in-memory object construction with concurrent I/O, enabling parallel processing of bounding-box slices or regional extracts. [Async PBF Parsing with Pyrosm](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/) demonstrates how to wrap a synchronous parser in a `ProcessPoolExecutor`/asyncio producer-consumer pattern that streams data through a bounded queue while preserving cache locality.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="ing-stages-t ing-stages-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="ing-stages-t">The five stages of an OSM ingestion pipeline and what each one is allowed to know</title>
+  <desc id="ing-stages-d">A left-to-right chain of five ingestion stages with the knowledge each is scoped to. Read knows the container format and nothing about tags. Decode knows the object model — nodes, ways, relations — and nothing about your schema. Resolve knows object references and needs a node cache. Normalise knows your tag vocabulary and nothing about output formats. Write knows the sink and nothing about OSM. A note explains that a stage reaching past its scope is what turns a pipeline into something that cannot be tested in pieces.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="ing" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Five stages, and what each is deliberately ignorant of</text>
+  <rect x="26" y="64" width="138" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="95" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">read</text>
+  <text x="95" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">container framing</text>
+  <text x="95" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">knows: bytes, blocks</text>
+  <line x1="164" y1="96" x2="194" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ing)"/>
+  <rect x="198" y="64" width="138" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="267" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">decode</text>
+  <text x="267" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">object model</text>
+  <text x="267" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">knows: node/way/relation</text>
+  <line x1="336" y1="96" x2="366" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ing)"/>
+  <rect x="370" y="64" width="138" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="439" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">resolve</text>
+  <text x="439" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">references</text>
+  <text x="439" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">knows: the node cache</text>
+  <line x1="508" y1="96" x2="538" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ing)"/>
+  <rect x="542" y="64" width="138" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="611" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">normalise</text>
+  <text x="611" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">your vocabulary</text>
+  <text x="611" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">knows: tag rules</text>
+  <line x1="680" y1="96" x2="710" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#ing)"/>
+  <rect x="714" y="64" width="138" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="783" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">write</text>
+  <text x="783" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">the sink</text>
+  <text x="783" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">knows: Parquet, PostGIS</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The test for a leak is simple: if changing the output format requires touching the decoder, the boundary has already been crossed.</text>
+</svg>
+<figcaption>The scoping is the design. Each stage can be tested with a fixture and swapped independently precisely because none of them knows what the next one needs.</figcaption>
+</figure>
 
 Because memory consumption scales non-linearly with feature density, pipelines must incorporate boundary-aware windowing and lazy evaluation. [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) is essential for preventing garbage-collection thrashing when transforming dense urban extracts, where millions of nodes and complex multipolygon relations coexist. The recurring constraint is the node-location store: to rebuild way geometry you must resolve every node reference to a coordinate, and a planet-scale node index will not fit in RAM. The two viable strategies are a streaming **two-pass** read (pass one caches node coordinates to an on-disk store, pass two assembles ways) or an **index-backed** store such as a flex-mem or LMDB cache. A minimal streaming skeleton with the logger pattern used across this site looks like this:
 
@@ -199,6 +236,38 @@ A typical production layout uses `osmium-tool` to pre-filter, `pyrosm` or `pyosm
 ## Production ETL patterns
 
 The choice between **streaming** and **batch** is really a memory-budget decision. Streaming (one feature at a time via pyosmium callbacks) keeps resident memory flat and is mandatory at planet scale; batch (materializing GeoDataFrames via pyrosm) is faster and simpler for bounded regional extracts. Parallelism follows the fileblock boundary: because each PBF fileblock is independently decodable, a `ProcessPoolExecutor` can fan blocks out to workers, with cross-block way reconciliation handled in a final reduce step.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="etl-shapes-t etl-shapes-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="etl-shapes-t">Three pipeline shapes and the extract size each one is honest about</title>
+  <desc id="etl-shapes-d">Three panels. A single-process stream handles up to a country extract, uses bounded memory, is trivially debuggable, and is limited by one core. A multi-process fan-out over PBF blocks handles a continent, scales with cores, but requires a shared node cache and makes ordering non-deterministic. A distributed job over pre-split extracts handles the planet, scales horizontally, but pays a shuffle to resolve cross-boundary references and needs a scheduler.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Pick the smallest shape that fits the extract you actually process</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Single process, streaming</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Fits: up to a country extract</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Memory: bounded by chunk size</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cores used: one</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Ordering: deterministic</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Debugging: a normal traceback</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Multi-process over blocks</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Fits: continent extracts</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Memory: per worker, plus node cache</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cores used: all of them</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Ordering: non-deterministic</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Debugging: needs per-worker logs</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Distributed over sub-extracts</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Fits: the planet</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Memory: per executor</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Cores used: a cluster</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Ordering: none without a sort</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Debugging: a scheduler UI</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The question that decides it is not how big the planet is — it is how big the extract you run every night is.</text>
+</svg>
+<figcaption>Each step up buys scale and costs determinism. Most teams need the first, reach for the third, and discover the cross-boundary reference problem the second one already had.</figcaption>
+</figure>
 
 Build for idempotency and checkpointing. Normalization should be a pure function of `(extract version, ruleset version)` so retries are safe and a partial failure resumes from the last committed checkpoint rather than restarting. Concrete failure modes to design against: out-of-memory on dense relations (mitigate with chunked reads), unresolved references at extract edges (mitigate with quarantine, not crash), GC thrashing on tens of millions of small tag dicts (mitigate with columnar batching), and silent corruption from a single misread varint in a delta-encoded `DenseNodes` block (mitigate with per-block bounds checks). As volumes grow, distributed frameworks such as Dask or Ray partition normalization across worker nodes while message queues decouple ingestion from transformation; region-specific override files apply localized rules before merge so global outputs stay consistent without erasing legally or culturally significant regional distinctions.
 

@@ -26,9 +26,41 @@ Resolve absent OSM keys — `highway`, `surface`, `maxspeed`, `oneway`, `lanes` 
 
 OpenStreetMap's schemaless model guarantees contributor flexibility, but that freedom means any key can be absent on any element. Critical keys go missing for three distinct reasons, and they must not be treated the same way: a key is *legitimately absent* (a footpath has no `maxspeed`), it is *unmapped* (a road that simply has not been surveyed for `surface`), or it is an *extraction artifact* (a value clipped to an empty string or coerced to `NaN` during a spatial join). The first justifies a documented default; the second and third must be inferred or quarantined, never guessed. Distinguishing them is the whole job of this stage, which sits inside [Batch Attribute Mapping Strategies](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/batch-attribute-mapping-strategies/) and receives the quarantine routing that page defines.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="missing-kinds-t missing-kinds-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="missing-kinds-t">Three reasons a tag is absent, and why they must not be filled the same way</title>
+  <desc id="missing-kinds-d">Three panels. Not surveyed means the mapper never recorded it and the true value is unknown; filling it invents data and a null is the honest answer. Implied by another tag means the value is derivable, such as a residential road carrying an urban default; filling it is correct if the derivation is stamped. Genuinely inapplicable means the tag does not apply, such as a maxspeed on a footpath; filling it is wrong in a different way, and the column should be null with a reason.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three absences that look identical in the data</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Not surveyed</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Nobody recorded it</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">True value exists, unknown</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Filling it invents data</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Correct: null, count as a gap</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Fixable by: a mapper going there</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Implied elsewhere</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Derivable from other tags</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">e.g. urban residential default</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Filling it is correct</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Correct: fill, provenance='implied'</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Fixable by: your derivation rules</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Inapplicable</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">The tag does not apply here</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">e.g. maxspeed on a footway</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Filling it is a category error</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Correct: null with a reason code</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Fixable by: nothing — it is right</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Carry a reason code beside the null. It costs a small enum and turns an unusable completeness number into an actionable one.</text>
+</svg>
+<figcaption>A single null cannot distinguish these three, which is why a completeness metric computed on null counts alone always overstates how much is missing.</figcaption>
+</figure>
+
 A naive `.fillna()` violates OSM tagging semantics by collapsing all three cases into one fabricated value. The correct approach is a priority-ordered chain: try the primary key, then ranked secondary keys that carry the same signal, then a region-appropriate default, and only if all fail, quarantine the row. This presupposes that values have already been trimmed and case-resolved — that cleaning belongs to [Value Standardization & Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/), and the diagnostic below treats a whitespace-only or `"nan"` string as missing precisely because uncleaned input would otherwise read as present.
 
-<svg viewBox="0 0 980 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Decision flow for a single raw OSM tag value. Test whether the value is present and non-empty; if yes, keep it. If not, try fallback key one, then fallback key two — each, if it holds a value, fills the primary key. If all fallbacks fail, test for a documented regional default: if one exists, apply it and write an audit log entry; otherwise route the row to a quarantine dead-letter partition." style="width:100%;max-width:980px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 980 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Decision flow for a single raw OSM tag value. Test whether the value is present and non-empty; if yes, keep it. If not, try fallback key one, then fallback key two — each, if it holds a value, fills the primary key. If all fallbacks fail, test for a documented regional default: if one exists, apply it and write an audit log entry; otherwise route the row to a quarantine dead-letter partition." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Priority-ordered resolution path for a missing OSM tag</title>
   <desc>A left-to-right decision chain: a raw tag value is tested for presence; a yes at any stage keeps or fills the value, the no path walks ranked fallback keys, then a regional default, and finally quarantine when nothing resolves.</desc>
   <defs>
@@ -36,6 +68,7 @@ A naive `.fillna()` violates OSM tagging semantics by collapsing all three cases
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="980" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g text-anchor="middle" fill="currentColor">
     <!-- start -->
     <rect x="20" y="68" width="100" height="44" rx="6" fill="currentColor" fill-opacity="0.05" stroke="currentColor" stroke-width="1.5"/>
@@ -235,6 +268,39 @@ For planetary or continental files that exceed RAM, drive the same functions ove
 ## Verification
 
 Confirm the stage behaved before handing the result to a graph builder:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="missing-verify-t missing-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="missing-verify-t">Checks that keep a null-handling strategy honest over time</title>
+  <desc id="missing-verify-d">A grid of four checks with what a healthy result looks like. The share of rows filled by defaults should be stable release to release; a jump means upstream tagging changed or a rule broke. No output row should have a filled value with a null provenance code. Rows marked inapplicable should never appear for feature classes where the tag does apply. And the count of not-surveyed rows should trend down over releases as the map improves, not up.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four checks — the last one measures the map, not the pipeline</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">healthy</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what a breach means</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">share filled by defaults</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">stable ±1pp</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">upstream tagging shifted, or a rule broke</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">filled value, null provenance</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">never happens</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">a fill path bypassed the stamp</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">inapplicable on an applicable class</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">never happens</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">the applicability rule is wrong</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">not-surveyed count over releases</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">trending down</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">rising: your extract area is growing faster than it is mapped</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Snapshot these four per release into a small table. Trends are what make them useful; a single reading tells you almost nothing.</text>
+</svg>
+<figcaption>The last one is a data-quality signal about OSM itself rather than about your pipeline, and it is the one worth putting on a dashboard.</figcaption>
+</figure>
 
 - The coverage log shows `present + missing == len(gdf)` for every key, and `coverage_pct` for `highway` is near 100 on a `network_type="driving"` extract.
 - After `resolve_missing_tags`, re-running `diagnose_tag_coverage` on `maxspeed` shows higher coverage than before — the `maxspeed:forward`/`backward` donors filled real gaps.

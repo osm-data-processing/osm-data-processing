@@ -13,7 +13,7 @@ date: 2026-06-26
 
 Value standardization is the stage where contributor-typed strings become machine-comparable values, and the failure it prevents is the kind that never raises an exception. Consider a single road surface tagged `surface=Asphalt ` in one regional import and `surface=asphalt` in another, with an invisible zero-width space appended by a copy-paste from a wiki table. To Python these are three distinct strings, so a `group_by("surface")` reports three categories instead of one, a paved/unpaved reclassification misses two of them, and a routing cost surface built downstream assigns different edge weights to identical pavement. The byte difference is undetectable to a human reviewer and survives schema validation untouched — it only surfaces as a quietly wrong isochrone or an inflated category count weeks later. This guide builds the deterministic cleaning layer that collapses those variants to one canonical value before any join, aggregation, or graph build can inherit the defect.
 
-<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Deterministic cleaning pipeline for one OSM tag value: a raw value passes through strip edges, remove control characters, and collapse internal whitespace, then a controlled-vocabulary lookup branches on hit to a canonical value or on miss to an audited pass-through, and both branches are written to a Parquet chunk" style="width:100%;max-width:720px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Deterministic cleaning pipeline for one OSM tag value: a raw value passes through strip edges, remove control characters, and collapse internal whitespace, then a controlled-vocabulary lookup branches on hit to a canonical value or on miss to an audited pass-through, and both branches are written to a Parquet chunk" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Deterministic value-cleaning pipeline</title>
   <desc>A raw tag value flows left to right through three regex stages: strip leading and trailing whitespace and zero-width characters, remove ASCII control characters, and collapse runs of internal whitespace to a single space. The cleaned string then enters a controlled-vocabulary lookup. On a hit it becomes a canonical value; on a miss it passes through and is logged for audit. Both outcomes are written to the same Parquet chunk.</desc>
   <defs>
@@ -21,6 +21,7 @@ Value standardization is the stage where contributor-typed strings become machin
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="720" height="360" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g font-size="12.5" fill="currentColor" text-anchor="middle">
     <!-- top chain: regex cleaning stages -->
     <rect x="20" y="34" width="120" height="52" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -238,6 +239,34 @@ A cleaning stage is only trustworthy if it names the ways it fails and how each 
 
 The dominant cost in cleaning is rarely the regex engine itself but how often patterns are compiled and how data is laid out when they run. Three figures govern throughput. First, compile every pattern once at module load — recompiling inside a per-row callback can multiply wall-clock time by an order of magnitude on a multi-million-row chunk. Second, chunk size trades memory against scheduling overhead: chunks of roughly 1–5 million rows keep buffers in cache-friendly ranges while amortizing the fixed cost of `map` dispatch and Parquet row-group framing. Third, casting cleaned categorical columns such as `surface` to a pandas `category` dtype after normalization shrinks memory by an order of magnitude on high-cardinality extracts and accelerates the downstream `group_by` that mapping and validation perform.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="regex-cost-t regex-cost-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="regex-cost-t">The cost of five ways to apply the same cleaning rule to a column</title>
+  <desc id="regex-cost-d">A bar chart of seconds to clean a ten million row string column. A Python loop with re.sub per row takes 88 seconds. A pandas apply with a compiled pattern takes 71. The pandas str.replace accessor with regex enabled takes 34. A dictionary map for exact-match replacements takes 2.9. And a pyarrow compute replace_substring_regex takes 1.6.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The fastest cleaning rule is the one that does no matching</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">seconds to clean a 10 M row string column</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">Python loop + re.sub</text>
+  <rect x="250" y="74" width="427" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="687" y="89" font-size="11" fill="currentColor" opacity="0.9">88 s · per-row interpreter overhead</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">.apply() with a compiled pattern</text>
+  <rect x="250" y="116" width="345" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="605" y="131" font-size="11" fill="currentColor" opacity="0.9">71 s · still per-row</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">.str.replace(regex=True)</text>
+  <rect x="250" y="158" width="165" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="425" y="173" font-size="11" fill="currentColor" opacity="0.9">34 s · vectorised, still regex</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">dict map for exact values</text>
+  <rect x="250" y="200" width="14" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="274" y="215" font-size="11" fill="currentColor" opacity="0.9">2.9 s · hash lookup, no matching</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">pyarrow replace_substring_regex</text>
+  <rect x="250" y="242" width="8" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="268" y="257" font-size="11" fill="currentColor" opacity="0.9">1.6 s · compiled, columnar</text>
+  <text x="440" y="306" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Split the rule set: exact-value substitutions go to a dictionary map, and only genuinely pattern-shaped rules pay for a regex.</text>
+</svg>
+<figcaption>Two of these are an order of magnitude apart from the rest, and both avoid per-row Python. Where the rule is an exact-value substitution, the dictionary map beats every regex approach by doing no matching at all.</figcaption>
+</figure>
+
 When memory rather than CPU is the binding constraint, prefer narrowing the chunk and streaming over widening parallelism — the patterns in [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) keep each worker's resident set bounded, whereas each additional parallel worker holds its own copy of the in-flight chunk. The explicit `gc.collect()` between chunks matters here: without it, the interpreter accumulates the millions of small tag dictionaries each chunk creates, and GC pressure rather than cleaning logic becomes the bottleneck.
 
 ## Failure modes & gotchas
@@ -280,9 +309,10 @@ def clean_then_expand(
 
 The companion guide on [automating tag case normalization with pandas](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/automating-tag-case-normalization-with-pandas/) shows the fully vectorized form of the casing step, replacing the per-dict loop above with column-level `replace` over the pandas C backend for high-throughput pipelines.
 
-<svg viewBox="0 0 720 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Before-and-after comparison of one surface value: before cleaning, three raw strings (Asphalt with a trailing space and zero-width character, ASPHALT in upper case, and asphalt) are counted as three distinct categories by group_by; after stripping and a controlled-vocabulary map all three collapse to the single canonical value asphalt, dropping the distinct count from three to one" style="width:100%;max-width:720px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 720 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Before-and-after comparison of one surface value: before cleaning, three raw strings (Asphalt with a trailing space and zero-width character, ASPHALT in upper case, and asphalt) are counted as three distinct categories by group_by; after stripping and a controlled-vocabulary map all three collapse to the single canonical value asphalt, dropping the distinct count from three to one" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>One surface value: three variants collapse to one canonical category</title>
   <desc>The left panel shows three raw surface values that look almost identical: Asphalt followed by an invisible trailing space and zero-width character, ASPHALT in upper case, and lower-case asphalt. Because the bytes differ, group_by reports three distinct categories. The right panel shows the result after stripping edges and applying the controlled-vocabulary map: all three become the single canonical value asphalt, so group_by now reports one category. The distinct count drops from three to one.</desc>
+  <rect x="0" y="0" width="720" height="330" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- BEFORE panel -->
   <text x="166" y="28" text-anchor="middle" font-size="13" fill="currentColor" font-weight="600">Before — raw byte variants</text>
   <rect x="16" y="40" width="300" height="256" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>

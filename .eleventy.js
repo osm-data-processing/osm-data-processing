@@ -91,7 +91,7 @@ module.exports = function (eleventyConfig) {
       `    <span class="code-block__lang">${escapeHtml(label)}</span>`,
       `    <button type="button" class="code-block__copy" aria-label="Copy code">Copy</button>`,
       `  </figcaption>`,
-      `  <pre class="code-block__pre language-${escapeHtml(label)}"><code class="language-${escapeHtml(label)}">${highlighted}</code></pre>`,
+      `  <pre class="code-block__pre language-${escapeHtml(label)}" tabindex="0"><code class="language-${escapeHtml(label)}">${highlighted}</code></pre>`,
       `</figure>\n`
     ].join("\n");
   };

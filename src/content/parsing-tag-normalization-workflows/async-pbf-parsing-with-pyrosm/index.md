@@ -13,7 +13,7 @@ date: 2026-06-26
 
 OpenStreetMap PBF extracts routinely exceed multi-gigabyte thresholds, which turns a single synchronous parse into the longest pole in any production spatial ETL pipeline. When one thread reads a 4 GB country extract end to end before a single feature is normalized, the CPU sits idle during disk reads and the disk sits idle during tag validation — the two costliest stages never overlap, and a planet-scale ingest that should finish overnight runs for days. This page shows how to keep both resources saturated by wrapping Pyrosm's blocking reader in a `ProcessPoolExecutor` and streaming results through a bounded `asyncio` queue, so parsing and downstream transformation proceed concurrently without exhausting memory.
 
-<svg viewBox="0 0 740 410" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sequence diagram of the async PBF parsing handoff: the producer task submits a tile to a ProcessPool worker and receives a Future, pushes that Future onto a bounded asyncio queue (blocking if the queue is full), the async consumer awaits the queue to get the Future, resolves it off the event loop with asyncio.to_thread, receives a pyarrow Table from the worker, and yields it downstream" style="width:100%;max-width:740px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 740 410" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sequence diagram of the async PBF parsing handoff: the producer task submits a tile to a ProcessPool worker and receives a Future, pushes that Future onto a bounded asyncio queue (blocking if the queue is full), the async consumer awaits the queue to get the Future, resolves it off the event loop with asyncio.to_thread, receives a pyarrow Table from the worker, and yields it downstream" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Async PBF Producer-Consumer Sequence</title>
   <desc>The producer task calls executor.submit(parse_tile) on a ProcessPool worker and gets back a concurrent.futures.Future. It then calls put(future) on a bounded asyncio.Queue, which awaits if the queue is full (back-pressure). The async consumer awaits queue.get() to receive the future, resolves it with await asyncio.to_thread(future.result), receives a pyarrow.Table from the worker process, and yields the Table downstream.</desc>
   <defs>
@@ -21,6 +21,7 @@ OpenStreetMap PBF extracts routinely exceed multi-gigabyte thresholds, which tur
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="740" height="410" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- lifeline headers -->
   <g font-size="12" fill="currentColor" text-anchor="middle">
     <rect x="25"  y="14" width="150" height="46" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -191,7 +192,7 @@ When a worker encounters malformed geometries or missing mandatory attributes, i
 
 ## Validation & error-handling matrix
 
-<svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Back-pressure diagram: the producer submits and calls put() into a bounded queue of eight slots; with six of eight slots occupied the producer is close to the cap, and put() awaits once the queue is full, throttling submission. The async consumer calls get() and to_thread() to drain at a steady rate. A band notes that peak memory is approximately the worker count plus the queue depth times the average table size, where workers are the throughput dial and queue depth is the latency-smoothing dial" style="width:100%;max-width:720px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Back-pressure diagram: the producer submits and calls put() into a bounded queue of eight slots; with six of eight slots occupied the producer is close to the cap, and put() awaits once the queue is full, throttling submission. The async consumer calls get() and to_thread() to drain at a steady rate. A band notes that peak memory is approximately the worker count plus the queue depth times the average table size, where workers are the throughput dial and queue depth is the latency-smoothing dial" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Bounded-Queue Back-Pressure and Peak-Memory Bound</title>
   <desc>The producer task submits tiles and pushes futures with put() into a bounded asyncio queue of eight slots. The queue is shown with six of eight slots occupied; once all slots are full, put() awaits, applying back-pressure that prevents the producer from outrunning the consumer. The async consumer calls get() then asyncio.to_thread() and drains at a steady rate. A lower band states the bound: peak memory is approximately (worker count w + queue depth q) multiplied by the average table size, where w is the throughput dial up to the core count and q is the latency-smoothing dial at linear memory cost.</desc>
   <defs>
@@ -199,6 +200,7 @@ When a worker encounters malformed geometries or missing mandatory attributes, i
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="720" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- feedback / back-pressure loop -->
   <path d="M344,117 L344,80 L99,80 L99,114" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrBp)"/>
   <text x="300" y="72" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">put() awaits while full — back-pressure</text>
@@ -251,6 +253,39 @@ When a worker encounters malformed geometries or missing mandatory attributes, i
 ## Performance & scale considerations
 
 Peak resident memory is dominated not by the number of CPU cores but by how many parsed tables can exist at once. With `w` worker processes each holding one in-flight GeoDataFrame and a queue admitting up to `q` completed Arrow tables, the working set is bounded by:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="async-gain-t async-gain-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="async-gain-t">Where asynchronous block streaming actually helps and where it does not</title>
+  <desc id="async-gain-d">A grid of four workload shapes against whether asyncio helps. Reading blocks from local NVMe is CPU-bound after decompression, so asyncio adds overhead and no speed-up. Reading from network storage is latency-bound and asyncio overlaps the waits, giving a large gain. Decoding protobuf is pure CPU in the interpreter and asyncio cannot help; processes can. Writing to a remote sink is latency-bound again and overlaps well.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">asyncio overlaps waiting, never computing</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">bound by</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">does asyncio help?</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">read from local NVMe</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">CPU after inflate</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">no — adds overhead</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">read from object storage</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">network latency</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">yes — large gain</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">protobuf decode</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">CPU in the interpreter</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">no — use processes</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">write to a remote sink</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">network latency</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">yes — overlaps well</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The productive combination is a small async layer for fetch and write around a process pool for decode — not one or the other.</text>
+</svg>
+<figcaption>The honest summary is that asyncio helps exactly where the pipeline waits and never where it computes. Two of these four rows are waiting; the other two need processes.</figcaption>
+</figure>
 
 $$ M_{\text{peak}} \approx (w + q) \times \bar{s}_{\text{table}} $$
 

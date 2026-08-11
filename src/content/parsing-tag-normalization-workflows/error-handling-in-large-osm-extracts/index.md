@@ -13,7 +13,7 @@ date: 2026-06-26
 
 A continental OpenStreetMap (OSM) extract is not a clean dataset — it is a multi-gigabyte stream of community-contributed primitives in which a single corrupt block, a stray control character in a tag value, or a way that references a node missing from the extract can abort an overnight ingest at hour six. The failure that hurts most is the *silent* one: a decoder that swallows an unresolved reference and emits a way with a truncated geometry, which then poisons a routing graph that looks structurally valid until a journey planner returns a route through a wall. Error handling in this stage is therefore not defensive boilerplate around the happy path; it is the contract that decides which records reach the sink, which are quarantined for review, and when the pipeline must stop rather than commit garbage. This page shows how to wrap the parse-and-normalize loop in deterministic exception boundaries, route defective records to a dead-letter queue, halt on systematic corruption with a circuit breaker, and resume from the last committed checkpoint without reprocessing the whole archive.
 
-<svg viewBox="0 0 860 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flowchart of the resilient OSM ingest loop. A PBF chunk enters a decode-and-validate decision. On success it flows to normalise tags, then a schema-conformant decision: yes commits to the sink, no routes to the quarantine dead-letter queue. On a decode error the chunk goes to a log step recording offset and chunk id, then an error-rate-above-threshold decision: yes halts via the circuit breaker, no skips the block and continues the stream." style="width:100%;max-width:860px;display:block;margin:1.5rem auto;font-family:inherit;color:inherit;">
+<svg viewBox="0 0 860 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flowchart of the resilient OSM ingest loop. A PBF chunk enters a decode-and-validate decision. On success it flows to normalise tags, then a schema-conformant decision: yes commits to the sink, no routes to the quarantine dead-letter queue. On a decode error the chunk goes to a log step recording offset and chunk id, then an error-rate-above-threshold decision: yes halts via the circuit breaker, no skips the block and continues the stream." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;color:inherit;">
   <title>Resilient OSM ingest loop: commit, quarantine, or halt</title>
   <desc>Each PBF chunk passes a decode-and-validate gate. Successful decodes are normalised and checked against the schema: conformant features commit to the sink, non-conformant features are quarantined to a dead-letter queue. Failed decodes are logged with their byte offset and chunk id, then fed to a circuit breaker; if the rolling block-error rate exceeds the threshold the pipeline halts, otherwise it skips the block and continues. There is no fourth state in which a defect is silently absorbed.</desc>
   <defs>
@@ -21,6 +21,7 @@ A continental OpenStreetMap (OSM) extract is not a clean dataset — it is a mul
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="860" height="560" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="none" stroke="currentColor">
     <!-- edges -->
     <line x1="430" y1="67"  x2="430" y2="112" stroke-width="1.5" marker-end="url(#ehArr)"/>
@@ -256,7 +257,7 @@ def split_and_sink(records: Iterator[Record], dlq_root: str) -> dict[str, int]:
 
 ## Validation & error-handling matrix
 
-<svg viewBox="0 0 820 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Decision matrix routing each error scope to a destination. Field-scoped defects (malformed value, non-UTF-8 byte) normalise or null to continue, or quarantine when non-UTF-8. Feature-scoped defects (unresolved reference, missing key) quarantine to the dead-letter queue. Block-scoped defects (zlib decode error, oversize blob) discard the block and continue, each incrementing a circuit breaker. The breaker tracks the rolling block-error rate over a window of two hundred; below the five percent threshold it tolerates and continues, above it the pipeline halts." style="width:100%;max-width:820px;display:block;margin:1.5rem auto;font-family:inherit;color:inherit;">
+<svg viewBox="0 0 820 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Decision matrix routing each error scope to a destination. Field-scoped defects (malformed value, non-UTF-8 byte) normalise or null to continue, or quarantine when non-UTF-8. Feature-scoped defects (unresolved reference, missing key) quarantine to the dead-letter queue. Block-scoped defects (zlib decode error, oversize blob) discard the block and continue, each incrementing a circuit breaker. The breaker tracks the rolling block-error rate over a window of two hundred; below the five percent threshold it tolerates and continues, above it the pipeline halts." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;color:inherit;">
   <title>Error scope to destination routing with the circuit-breaker threshold band</title>
   <desc>Three boundary scopes map to destinations. Field-scoped defects normalise or null and continue to the sink, except non-UTF-8 bytes which quarantine. Feature-scoped defects (unresolved references, missing required keys) quarantine to the dead-letter queue. Block-scoped decode errors discard the block and continue, each error incrementing the circuit breaker. The breaker measures the rolling block-error rate over a window of 200 blocks: below the 5 percent threshold it tolerates and discards, above the threshold it trips and halts the pipeline.</desc>
   <defs>
@@ -264,6 +265,7 @@ def split_and_sink(records: Iterator[Record], dlq_root: str) -> dict[str, int]:
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="820" height="470" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- column captions -->
   <g fill="currentColor" font-size="11" opacity="0.7" text-anchor="middle">
     <text x="149" y="44">boundary scope</text>
@@ -365,6 +367,39 @@ where $\bar{t}_{\text{block}}$ is the mean per-block processing time — which i
 ## Integration points
 
 Error handling is a middleware stage: it consumes the raw feature stream from the parser and emits a *clean* stream plus a dead-letter store. Downstream, the committed records feed topology assembly. The most common defect class quarantined here — malformed tags — has its own dedicated remediation procedure in [Fixing malformed OSM tags during ETL ingestion](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/fixing-malformed-osm-tags-during-etl-ingestion/), which reads the `reason=` partitions this stage writes and applies targeted regex repairs before re-submitting records. The wiring below couples the breaker-guarded stream to the sink and an idempotent checkpoint manifest:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="err-routing-t err-routing-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="err-routing-t">Where each failure class should be routed once it is detected</title>
+  <desc id="err-routing-d">A grid of four failure classes against the destination and the retry policy. A transient I/O fault goes back to the same stage with bounded exponential retry. A malformed single object goes to a dead-letter partition and the run continues. A structurally broken block fails the run, because a corrupt block means the file cannot be trusted. And a schema mismatch against the mapping registry fails fast at startup rather than at object one million.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Continue on object faults, stop on file faults</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">destination</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">retry policy</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">transient I/O</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">same stage</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">exponential backoff, bounded</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">one malformed object</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">dead-letter partition</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">never — record and move on</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">corrupt block</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">fail the run</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">never — the file is untrustworthy</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">schema mismatch</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">fail at startup</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">never — fix the registry</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The dead-letter partition needs a size alarm. A run that quarantines four million objects and exits zero has not succeeded.</text>
+</svg>
+<figcaption>Two of these continue and two stop, and the distinction is whether the fault is local to one object or tells you something about the whole input.</figcaption>
+</figure>
 
 ```python
 from __future__ import annotations

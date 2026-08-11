@@ -4,7 +4,7 @@ pageDescription: "OSM node/way/relation schema, PBF and XML serialization, spec 
 # OSM Data Fundamentals & Architecture
 
 <figure class="diagram-wrap">
-<svg viewBox="0 0 1040 268" role="img" aria-labelledby="archflow-title archflow-desc" xmlns="http://www.w3.org/2000/svg" style="color:var(--c-ink)">
+<svg viewBox="-8 42 1056 222" role="img" aria-labelledby="archflow-title archflow-desc" xmlns="http://www.w3.org/2000/svg" style="color:var(--c-ink)">
   <title id="archflow-title">OSM data-layer pipeline: from raw extract to analytics output</title>
   <desc id="archflow-desc">A horizontal data-flow diagram. A raw OSM source extract is read by a streaming parser, decoded into node, way, and relation primitives, then fans out to two parallel stages — tag normalization and CRS transformation — which both feed a spatial index that finally emits analytics and routing outputs such as GeoParquet, PostGIS, and graphs.</desc>
   <defs>
@@ -20,6 +20,7 @@ pageDescription: "OSM node/way/relation schema, PBF and XML serialization, spec 
       .af-lab{font-family:var(--font-sans,sans-serif);font-size:9.5px;fill:currentColor;fill-opacity:.6;text-anchor:middle;}
     </style>
   </defs>
+  <rect x="-8" y="42" width="1056" height="222" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- edges -->
   <line class="af-e" x1="160" y1="134" x2="182" y2="134" marker-end="url(#archflow-arrow)"/>
   <line class="af-e" x1="336" y1="134" x2="358" y2="134" marker-end="url(#archflow-arrow)"/>
@@ -84,6 +85,39 @@ Three invariants govern correct reconstruction:
 Raw OSM data is distributed in two primary serializations. The original is OSM XML (`.osm`, often `.osm.bz2`), a verbose textual format whose human readability is offset by enormous I/O and parsing overhead — a continental extract can balloon to many times its binary size. The production standard is Protocolbuffer Binary Format (`.osm.pbf`), a compressed, schema-driven container engineered for high-throughput streaming. The [OSM XML vs PBF Comparison](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/) quantifies the I/O reduction and heap-allocation differences that make PBF the default for any bulk workflow.
 
 PBF achieves its density through three mechanisms working together:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 900 240" role="img" aria-labelledby="fmt-econ-t fmt-econ-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="fmt-econ-t">On-disk size and decode throughput across four OSM encodings</title>
+  <desc id="fmt-econ-d">Two paired bar panels for one country extract. On disk, raw .osm XML is 21.0 GB, .osm.bz2 is 1.6 GB and .osm.pbf is 1.2 GB. For single-core decode throughput the order inverts: XML manages 0.35 million objects per second, bzip2-compressed XML 0.30 million, and PBF 2.10 million.</desc>
+  <rect x="0" y="0" width="900" height="240" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="450" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The same extract, four encodings: size falls, decode speed rises</text>
+  <text x="34" y="58" font-size="12" font-weight="600" fill="currentColor">On-disk size (Germany extract)</text>
+  <text x="474" y="58" font-size="12" font-weight="600" fill="currentColor">Decode throughput, one core</text>
+  <line x1="150" y1="68" x2="150" y2="200" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <line x1="600" y1="68" x2="600" y2="200" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="140" y="94" text-anchor="end" font-size="11.5" fill="currentColor">.osm (XML)</text>
+  <rect x="150" y="80" width="260" height="20" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="418" y="94" font-size="11" fill="currentColor" opacity="0.85">21.0 GB</text>
+  <text x="140" y="132" text-anchor="end" font-size="11.5" fill="currentColor">.osm.bz2</text>
+  <rect x="150" y="118" width="20" height="20" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="178" y="132" font-size="11" fill="currentColor" opacity="0.85">1.6 GB</text>
+  <text x="140" y="170" text-anchor="end" font-size="11.5" fill="currentColor">.osm.pbf</text>
+  <rect x="150" y="156" width="15" height="20" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="173" y="170" font-size="11" fill="currentColor" opacity="0.85">1.2 GB</text>
+  <text x="590" y="94" text-anchor="end" font-size="11.5" fill="currentColor">.osm (XML)</text>
+  <rect x="600" y="80" width="43" height="20" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="651" y="94" font-size="11" fill="currentColor" opacity="0.85">0.35 M obj/s</text>
+  <text x="590" y="132" text-anchor="end" font-size="11.5" fill="currentColor">.osm.bz2</text>
+  <rect x="600" y="118" width="37" height="20" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="645" y="132" font-size="11" fill="currentColor" opacity="0.85">0.30 M obj/s</text>
+  <text x="590" y="170" text-anchor="end" font-size="11.5" fill="currentColor">.osm.pbf</text>
+  <rect x="600" y="156" width="252" height="20" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="700" y="170" font-size="11" font-weight="600" fill="currentColor">2.10 M obj/s</text>
+  <text x="450" y="222" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">bzip2 buys the disk saving and pays it back in CPU; PBF buys both, because the compression is per-block and the payload is already binary.</text>
+</svg>
+<figcaption>Compression alone trades disk for CPU. PBF changes both terms at once — a seventeen-fold size reduction <em>and</em> a six-fold decode speed-up — because each block is independently deflated protobuf rather than re-parsed text.</figcaption>
+</figure>
 
 1. **String-table deduplication** — within each block, every tag key and value is stored once in a `StringTable` and referenced elsewhere by integer index, eliminating the repetition that dominates XML.
 2. **Delta encoding** — node IDs, coordinates, and references are stored as signed differences from the previous value in the group, so monotonically increasing IDs compress to small varints.
@@ -194,6 +228,32 @@ As a rule of thumb: use `osmium-tool` to *shrink the problem* (clip and filter a
 ## Production ETL Patterns
 
 The defining constraint of OSM engineering is that the planet file does not fit in memory, so architecture decisions revolve around *never materializing the whole dataset*. Streaming beats batch for any planet- or continent-scale job: process one `PrimitiveBlock` at a time, emit to a columnar sink, and let the OS page cache do the buffering. Batch (load-then-transform) is acceptable only once an extract has been clipped down to a city or small region.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 900 268" role="img" aria-labelledby="etl-mem-t etl-mem-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="etl-mem-t">Resident memory across a full extract pass, batch against streaming</title>
+  <desc id="etl-mem-d">A line chart of resident memory against objects read. The batch trace climbs steadily as objects accumulate in memory, crosses a 32 GB container limit at about 71 percent of the file, and is killed. The streaming trace stays flat in a shallow sawtooth around 2.4 GB for the whole pass, because each chunk is flushed before the next is read.</desc>
+  <rect x="0" y="0" width="900" height="268" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="450" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Resident memory over one full pass: batch versus streaming</text>
+  <line x1="72" y1="230" x2="866" y2="230" stroke="currentColor" stroke-width="1.2"/>
+  <line x1="72" y1="52" x2="72" y2="230" stroke="currentColor" stroke-width="1.2"/>
+  <text x="62" y="230" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">0</text>
+  <text x="62" y="170" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">16 GB</text>
+  <text x="62" y="110" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">32 GB</text>
+  <text x="62" y="58" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.8">48 GB</text>
+  <text x="469" y="252" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">objects read →  0 … 412 M (whole extract)</text>
+  <line x1="72" y1="110" x2="866" y2="110" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3" stroke-dasharray="6 4"/>
+  <text x="860" y="102" text-anchor="end" font-size="10.5" font-weight="600" fill="currentColor">container limit — 32 GB</text>
+  <path d="M72,230 L300,196 L520,150 L700,104 L780,74 L790,230" fill="none" stroke="var(--osm-warn,#a16207)" stroke-width="2.4"/>
+  <circle cx="700" cy="104" r="4.5" fill="var(--osm-bad,#b91c1c)"/>
+  <text x="690" y="92" text-anchor="end" font-size="11" font-weight="600" fill="currentColor">OOM at 71% of the file</text>
+  <text x="300" y="188" font-size="11.5" font-weight="600" fill="currentColor">batch: hold every object, then write</text>
+  <path d="M72,222 L150,214 L200,222 L280,213 L330,222 L410,214 L460,222 L540,213 L590,222 L670,214 L720,222 L800,213 L866,220" fill="none" stroke="var(--osm-ok,#15803d)" stroke-width="2.4"/>
+  <text x="380" y="207" font-size="11.5" font-weight="600" fill="currentColor">streaming: bounded window, flush per chunk</text>
+  <text x="866" y="238" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.85">peak 2.4 GB</text>
+</svg>
+<figcaption>The two shapes are the whole argument for streaming. Batch memory is a function of <em>extract size</em>, so it fails at a file size you can predict but cannot control; streaming memory is a function of <em>chunk size</em>, which you set.</figcaption>
+</figure>
 
 Several patterns recur in resilient pipelines:
 

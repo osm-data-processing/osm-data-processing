@@ -13,7 +13,7 @@ date: 2026-06-26
 
 Batch attribute mapping is the deterministic translation layer between raw OpenStreetMap (OSM) tags and the typed columns every downstream stage assumes. The failure it prevents is silent and expensive: when a regional extract tags a road as `highway=primary_link` and your pipeline has only a rule for `primary`, the value falls through to `null`, the routing graph downgrades the slip road to an unweighted edge, and an isochrone built three stages later is quietly wrong with no error in any log. Multiply that across thousands of contributor-driven key variants and the analytical dataset degrades feature by feature while every job reports success. This page shows how to make the mapping stage explicit, versioned, and vectorized so that every input value resolves to a known target — or is routed to quarantine for review rather than fabricated into a default.
 
-<svg viewBox="0 0 760 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow diagram of the batch attribute mapping stage: a raw tag struct of highway, surface and maxspeed feeds a versioned schema registry lookup, then a decision tests whether the primary tag resolved. A hit produces typed columns directly; a miss enters a priority-ordered fallback chain over lanes, maxspeed and smoothness. A resolved fallback also yields typed columns, while an exhausted chain routes the record to a quarantine Parquet partition. Typed columns flow into cross-region harmonization and then routing-graph preparation." style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 760 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow diagram of the batch attribute mapping stage: a raw tag struct of highway, surface and maxspeed feeds a versioned schema registry lookup, then a decision tests whether the primary tag resolved. A hit produces typed columns directly; a miss enters a priority-ordered fallback chain over lanes, maxspeed and smoothness. A resolved fallback also yields typed columns, while an exhausted chain routes the record to a quarantine Parquet partition. Typed columns flow into cross-region harmonization and then routing-graph preparation." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Batch Attribute Mapping Data Flow</title>
   <desc>A raw tag struct (highway, surface, maxspeed) feeds a versioned schema registry lookup. A decision tests whether the primary tag resolved. A hit goes straight to typed columns (road_class, surface_type, speed). A miss enters a priority-ordered fallback chain over lanes, maxspeed and smoothness; a resolved fallback also produces typed columns, while an exhausted chain routes the record to a quarantine Parquet partition. Typed columns are then harmonized across regions and prepared as routing-graph inputs.</desc>
   <defs>
@@ -21,6 +21,7 @@ Batch attribute mapping is the deterministic translation layer between raw OpenS
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="500" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- 1 raw tag struct -->
   <rect x="60" y="20" width="260" height="58" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
   <text x="190" y="44" text-anchor="middle" font-size="13" fill="currentColor">Raw tag struct</text>
@@ -78,6 +79,31 @@ Three foundations should be in place before mapping rules run. First, mapping op
 ## Schema registries and deterministic transformations
 
 The foundation of reliable mapping is an explicit schema registry rather than ad-hoc conditional branching. A centralized mapping configuration — serialized as JSON, YAML, or a Parquet-backed lookup table — defines source-to-target transformations, handling case normalization, unit conversion, and deprecated tag aliases. Decoupling transformation rules from execution code lets teams version-control mapping configurations alongside pipeline releases, which yields audit trails and rollback capability: a misclassification introduced in registry `v7` can be diffed against `v6` and reverted without touching parser code.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="schema-reg-t schema-reg-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="schema-reg-t">What a versioned mapping registry gives you that inline mapping code does not</title>
+  <desc id="schema-reg-d">Two panels. Mapping expressed as inline code means the rule set is spread across functions, a change is a code deploy, there is no way to ask which version produced a row, and reproducing last month output means checking out last month code. A versioned registry means the rules are data with a version identifier, a change is a reviewed data change, every output row carries the version that produced it, and reproducing an old output means loading an old registry version.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Rules as data, versioned — so an output row can name what produced it</text>
+  <rect x="26" y="52" width="401" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Mapping as inline code</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Rules spread across functions</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">A change is a code deploy</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">No version stamped on the output</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Reproducing old output: check out old code</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Reviewing a change: read a diff of Python</text>
+  <rect x="453" y="52" width="401" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Versioned registry</text>
+  <text x="467" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Rules are data with a version id</text>
+  <text x="467" y="125" font-size="10.5" fill="currentColor" opacity="0.92">A change is a reviewed data change</text>
+  <text x="467" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Every row carries registry_version</text>
+  <text x="467" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Reproducing old output: load that version</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Reviewing a change: read a diff of rules</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">The registry version belongs in the output alongside the source sequence number — together they make a row fully reproducible.</text>
+</svg>
+<figcaption>The decisive property is the last one. Once a row records which registry version produced it, "why did this value change" becomes a diff between two versions instead of an archaeology exercise.</figcaption>
+</figure>
 
 The registry must be treated as an immutable artifact at run time. This directly supports [Async PBF Parsing with Pyrosm](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/), because concurrent chunk processors can reference the same mapping artifact without lock contention or redundant I/O — every worker reads the frozen table once and shares it copy-free.
 
@@ -177,6 +203,37 @@ The mapping stage assembles into a repeatable sequence that takes an expanded ta
 ## Deterministic fallback chains and error routing
 
 OSM data exhibits high variance across regions, contributor experience, and mapping campaigns, so the mapping stage must implement deterministic fallback chains when a primary tag is absent or malformed. Inferring `road_class` from `maxspeed`, `lanes`, or `smoothness` when `highway` is missing requires a priority-ordered evaluation sequence. These chains belong in vectorized conditional expressions, not row-wise Python loops, both to maintain throughput and to guarantee that every distributed worker evaluates the same priority order in the same way — a chain whose branch order depends on dict iteration would produce different results on different runs.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="fallback-chain-t fallback-chain-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="fallback-chain-t">A fallback chain that records which rung produced each value</title>
+  <desc id="fallback-chain-d">A left-to-right chain of four fallback rungs for deriving a road speed limit. First the explicit maxspeed tag. Failing that, an implied value from maxspeed:type or a country default. Failing that, a highway-class default from the mapping table. Failing that, the row is routed to review rather than given a value. Each rung stamps a provenance code on the output so a downstream consumer can tell a measured value from a guessed one.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="fbc" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Every rung stamps its provenance — a default and a survey must not look alike</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">explicit tag</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">maxspeed=50</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">provenance: 'tagged'</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#fbc)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">implied value</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">maxspeed:type, country</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">provenance: 'implied'</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#fbc)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">class default</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">from the mapping table</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">provenance: 'default'</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#fbc)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">no rung matched</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">value stays null</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">route to review</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Downstream, filter on provenance before publishing a statistic. A completeness metric computed over defaulted values measures your mapping table, not the map.</text>
+</svg>
+<figcaption>The stamp is what makes a fallback chain safe. Without it, a country default and a surveyed value are the same number in the same column, and no downstream query can tell them apart.</figcaption>
+</figure>
 
 When fallback logic fails to produce a valid attribute, the pipeline routes the record to a quarantine dataset for manual review. Silent null propagation or arbitrary default assignment introduces analytical bias and breaks downstream topology validation. A robust error-routing strategy logs the original tag payload, the applied fallback sequence, and the failure reason, which makes targeted data-quality audits possible. This quarantine workflow — the per-key inference rules and null policies it depends on — is documented in full by [Handling Missing Tags in OSM Data Pipelines](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/batch-attribute-mapping-strategies/handling-missing-tags-in-osm-data-pipelines/).
 

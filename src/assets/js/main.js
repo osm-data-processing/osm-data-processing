@@ -104,6 +104,49 @@
     });
   }
 
+  /* ---------- Theme toggle ----------
+     The scheme itself is already resolved by the inline <head> script, so this
+     only wires the control: flip the attribute, remember the choice, and keep
+     following the OS while the reader has not expressed one. */
+  function initThemeToggle() {
+    var root = document.documentElement;
+    var btn = document.querySelector("[data-theme-toggle]");
+
+    function label() {
+      if (!btn) return;
+      var dark = root.getAttribute("data-theme") === "dark";
+      btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+      btn.setAttribute("aria-pressed", dark ? "true" : "false");
+    }
+
+    function apply(theme, remember) {
+      root.setAttribute("data-theme", theme);
+      if (remember) {
+        try { localStorage.setItem("theme", theme); } catch (e) { /* private mode */ }
+      }
+      label();
+    }
+
+    label();
+
+    if (btn) {
+      btn.addEventListener("click", function () {
+        apply(root.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+      });
+    }
+
+    if (window.matchMedia) {
+      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      var onChange = function (e) {
+        var stored;
+        try { stored = localStorage.getItem("theme"); } catch (err) { stored = null; }
+        if (stored !== "dark" && stored !== "light") apply(e.matches ? "dark" : "light", false);
+      };
+      if (mq.addEventListener) mq.addEventListener("change", onChange);
+      else if (mq.addListener) mq.addListener(onChange);
+    }
+  }
+
   /* ---------- Service worker registration ---------- */
   function initServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
@@ -117,6 +160,7 @@
   }
 
   ready(function () {
+    initThemeToggle();
     initCopyButtons();
     initTaskLists();
     initFaqAccordions();

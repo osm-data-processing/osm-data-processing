@@ -14,12 +14,13 @@ date: 2026-07-14
 
 A way in OpenStreetMap carries no coordinates of its own — it is an ordered list of node references, and its geometry exists only after a parser resolves those references and closes the ring. That reconstruction step is where geometry goes wrong. A building traced as a figure-eight, a coastline way whose final node drifted a centimetre off its first, a multipolygon whose inner ring was digitised outside its outer: none of these are visible in the tag dictionary, and all of them pass straight through parsing to detonate later. The failure is rarely loud. An invalid polygon silently returns the wrong answer from a `contains` test, inflates or zeroes an area computation, or makes a PostGIS `ST_Union` abort an hours-long load with `TopologyException: side location conflict`. This guide sits inside the [OSM Data Quality & Validation](https://www.osm-data-processing.org/osm-data-quality-validation/) section and treats geometry as a gate: every reconstructed feature is classified as valid, repairable, or quarantine-worthy before it is allowed downstream.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 470" role="img" aria-label="Taxonomy of OSM geometry defects flowing into a detect, then repair-or-quarantine decision. Six defect classes — self-intersection, unclosed ring, spike or duplicate node, degenerate under-four-node polygon, wrong ring winding, and inner ring outside outer — feed a detection stage using Shapely is_valid, explain_validity, and is_simple. Valid geometries pass through. Repairable defects go to buffer zero, make_valid, or ring re-closing and are re-checked. Ambiguous or area-changing repairs are quarantined for human review rather than auto-fixed." style="width:100%;max-width:1080px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 470" role="img" aria-label="Taxonomy of OSM geometry defects flowing into a detect, then repair-or-quarantine decision. Six defect classes — self-intersection, unclosed ring, spike or duplicate node, degenerate under-four-node polygon, wrong ring winding, and inner ring outside outer — feed a detection stage using Shapely is_valid, explain_validity, and is_simple. Valid geometries pass through. Repairable defects go to buffer zero, make_valid, or ring re-closing and are re-checked. Ambiguous or area-changing repairs are quarantined for human review rather than auto-fixed." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>OSM geometry defect taxonomy feeding a detect then repair-or-quarantine flow</title>
   <desc>Six defect classes on the left feed a central detection stage built on Shapely is_valid, explain_validity and is_simple. Valid geometries pass through unchanged; repairable ones route to buffer(0), make_valid or ring re-closing and are re-validated; ambiguous or lossy cases route to a quarantine table for review.</desc>
   <defs>
     <marker id="gvr-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1080" height="470" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="540" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Classify every reconstructed feature: valid, repairable, or quarantine</text>
   <!-- Defect column -->
   <text x="150" y="52" text-anchor="middle" font-size="11.5" fill="currentColor" font-weight="700" opacity="0.8">DEFECT CLASSES</text>
@@ -240,6 +241,48 @@ The area-drift guard in the code deserves emphasis: `buffer(0)` and `make_valid`
 
 Three repair tools cover the field, and choosing between them is not arbitrary.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="geo-repair-t geo-repair-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="geo-repair-t">What four repair operations change about a geometry, and what they cost</title>
+  <desc id="geo-repair-d">A grid of four repair operations against what they preserve and what they alter. buffer(0) always returns a valid geometry but can silently drop small rings and shifts vertices. make_valid preserves every vertex but may return a collection instead of a polygon, changing the type. Snapping to a tolerance closes near-miss rings and moves vertices by up to that tolerance. Manual quarantine changes nothing and defers the decision to a human.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Every automated repair changes something — the question is what</text>
+  <text x="317" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">preserves vertices?</text>
+  <text x="531" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">can change the type?</text>
+  <text x="745" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what it can destroy</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">buffer(0)</text>
+  <rect x="213" y="84" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="317" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">no — shifts them</text>
+  <rect x="427" y="84" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="641" y="84" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="745" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">small rings, silently</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">make_valid()</text>
+  <rect x="213" y="124" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="427" y="124" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">yes — may return a collection</text>
+  <rect x="641" y="124" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="745" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">nothing, but type changes</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">snap to tolerance</text>
+  <rect x="213" y="164" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="317" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">no — up to tolerance</text>
+  <rect x="427" y="164" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="531" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="641" y="164" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="745" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">detail below the tolerance</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">quarantine</text>
+  <rect x="213" y="204" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">yes</text>
+  <rect x="427" y="204" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="531" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">no</text>
+  <rect x="641" y="204" width="208" height="32" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.2"/>
+  <text x="745" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">nothing — costs a human</text>
+  <text x="868" y="260" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Whichever you pick, record the original geometry alongside the repaired one. A repair you cannot inspect later is indistinguishable from bad source data.</text>
+</svg>
+<figcaption>The honest ranking is by what each one destroys. buffer(0) is the most convenient and the only one that can remove a courtyard without saying so.</figcaption>
+</figure>
+
 **`buffer(0)`** exploits a side effect of the buffer algorithm: buffering a polygon by zero distance re-runs the overlay engine, which reconstructs a valid geometry from the input's segments. It is fast and available in every Shapely version, and for a simple bowtie it produces the two triangles most people expect. Its weakness is unpredictability on complex rings — it can dissolve slivers, merge touching lobes, or return an empty geometry, and it gives no explanation. Treat it as a heuristic, never as a guarantee.
 
 **`make_valid`** (Shapely 2.x, backed by GEOS `MakeValid`) is the principled successor. It is designed to return a valid geometry that preserves as much of the input as possible, and crucially it is honest about ambiguity: a self-intersecting polygon may come back as a `MultiPolygon` or a `GeometryCollection` mixing polygons and lines. That collection *is* the signal to inspect — it means the original shape had no single unambiguous interpretation. The code above extracts the dominant polygon and quarantines when nothing polygonal survives, rather than pretending the collection is a clean fix.
@@ -253,6 +296,34 @@ Auto-repair is appropriate for defects with a single obvious correct answer: a n
 ## Performance & Scale Considerations
 
 Validity checking is cheap per feature but runs across every reconstructed geometry in a continental extract, so constant factors matter. `is_valid` is O(n log n) in the vertex count for the sweep-line intersection test, which dominates on dense coastline and boundary polygons with tens of thousands of vertices. Two levers help. First, **short-circuit**: call `is_valid` before `explain_validity`, because the explanation is markedly more expensive and most geometries are valid. Second, **prepare geometries you test repeatedly**: when validation involves containment checks — inner-in-outer, member-in-relation — use Shapely's prepared geometries or the spatial index from [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/) so you filter candidate pairs by bounding box before running the exact predicate. Validating an unindexed all-pairs containment across a country's buildings is the classic accidental quadratic that turns a ten-minute job into an overnight one.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 324" role="img" aria-labelledby="geo-perf-t geo-perf-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="geo-perf-t">Validation cost per geometry against the check being run</title>
+  <desc id="geo-perf-d">A bar chart of microseconds per geometry for five checks over a building layer. A ring-closure test on the coordinate array is 0.8 microseconds. A vertex-count and bounds sanity check is 1.2. is_valid without a prepared geometry is 34. is_valid plus explain_validity to get the reason is 61. And a full make_valid repair is 210. Cheap structural checks run over everything; expensive ones run only over what the cheap checks flagged.</desc>
+  <rect x="0" y="0" width="880" height="324" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Order the checks by cost and the expensive ones almost never run</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">microseconds per geometry, building layer, single core</text>
+  <line x1="250" y1="68" x2="250" y2="270" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">ring closure (array test)</text>
+  <rect x="250" y="74" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="89" font-size="11" fill="currentColor" opacity="0.9">0.8 µs · run on everything</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">vertex count + bounds</text>
+  <rect x="250" y="116" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="131" font-size="11" fill="currentColor" opacity="0.9">1.2 µs · run on everything</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">is_valid()</text>
+  <rect x="250" y="158" width="72" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="332" y="173" font-size="11" fill="currentColor" opacity="0.9">34 µs · run on survivors</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">is_valid + explain_validity</text>
+  <rect x="250" y="200" width="130" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="390" y="215" font-size="11" fill="currentColor" opacity="0.9">61 µs · run on failures only</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">make_valid()</text>
+  <rect x="250" y="242" width="447" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="707" y="257" font-size="11" fill="currentColor" opacity="0.9">210 µs · run on repairables only</text>
+  <text x="440" y="306" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">On a layer where 3 percent of geometries are invalid, this ordering turns 210 µs per feature into roughly 8 µs.</text>
+</svg>
+<figcaption>Ordering the checks cheapest-first is worth roughly two orders of magnitude, because the expensive predicate then runs on the few percent that the cheap ones could not clear.</figcaption>
+</figure>
 
 ## Failure Modes & Gotchas
 

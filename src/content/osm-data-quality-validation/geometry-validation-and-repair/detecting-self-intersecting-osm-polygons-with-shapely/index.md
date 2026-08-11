@@ -26,14 +26,47 @@ Scan a batch of reconstructed OSM area geometries and flag every self-intersecti
 
 A self-intersection is a polygon whose boundary crosses itself, so the ring no longer separates a coherent inside from an outside. Two shapes dominate in OSM. The **bowtie** is a four-node quad whose two diagonal node pairs were traced in the wrong order, pinching the ring at a central crossing into two opposed triangles. The **figure-eight** is a longer outline that loops back through one of its own earlier edges. Both arise from ordinary mapping mistakes — a vertex dragged past its neighbour, an import that concatenated two rings — and both are invisible in the tags, so they surface only when a geometry engine tries to compute area, run a `contains` test, or union the feature into a coverage.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="selfint-kinds-t selfint-kinds-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="selfint-kinds-t">Three shapes Shapely reports as self-intersection and what each means on the ground</title>
+  <desc id="selfint-kinds-d">Three panels. A bowtie, where the ring crosses itself once, usually comes from two nodes swapped in the way order and encloses two lobes of opposite orientation. A spike, where the ring doubles back along itself, comes from a duplicated node or a mis-snapped vertex and encloses zero area at the spike. A ring touching itself at a single point is technically invalid but often intentional — a building with a pinched courtyard — and repairing it changes real geometry.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three self-intersections, only two of them are mistakes</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Bowtie</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Ring crosses itself once</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Cause: two nodes swapped in way order</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Encloses two lobes, opposite winding</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Area is meaningless</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Repair: almost always correct</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Spike</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Ring doubles back on itself</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Cause: duplicate or mis-snapped node</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Encloses zero area at the spike</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Length inflated, area roughly right</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Repair: almost always correct</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Self-touching ring</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Ring meets itself at one point</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Cause: a pinched courtyard, often real</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Invalid by OGC, plausible on the ground</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">buffer(0) splits it into two polygons</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Repair: check before automating</text>
+  <text x="868" y="235" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Classify before you repair. <code>explain_validity</code> distinguishes "Self-intersection" from "Ring Self-intersection" and that string is enough to route the third case to review.</text>
+</svg>
+<figcaption>The third case is why blanket repair is risky. Two of these are data errors; the third can be what the mapper meant, and buffer(0) will quietly split it into two polygons.</figcaption>
+</figure>
+
 Shapely, following the [OGC Simple Features](https://www.ogc.org/standards/sfa) model, exposes this through `is_valid`: a self-intersecting polygon returns `False`. The companion function `shapely.validation.explain_validity` returns a human-readable string naming the defect and, for a self-intersection, the coordinate where the boundary crosses — for example `Self-intersection[13.402 52.518]`. That coordinate is the payload worth capturing, because it points a reviewer straight at the offending vertex in an editor. This page is deliberately a *detection* step: it classifies and reports but never mutates, because deciding how to repair a bowtie — covered in the parent [Geometry Validation & Repair](https://www.osm-data-processing.org/osm-data-quality-validation/geometry-validation-and-repair/) guide — is a separate decision that should follow, not accompany, discovery.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" role="img" aria-label="How a self-intersection is detected. On the left, a bowtie polygon whose two diagonal edges cross at a central point marked as the self-intersection coordinate. In the middle, Shapely is_valid returns false and explain_validity returns the reason string with that crossing coordinate. On the right, the geometry is appended to a report as flagged, with its index, the defect class, and the coordinate, while the source geometry is left unchanged." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" role="img" aria-label="How a self-intersection is detected. On the left, a bowtie polygon whose two diagonal edges cross at a central point marked as the self-intersection coordinate. In the middle, Shapely is_valid returns false and explain_validity returns the reason string with that crossing coordinate. On the right, the geometry is appended to a report as flagged, with its index, the defect class, and the coordinate, while the source geometry is left unchanged." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Detecting a self-intersecting OSM polygon and reporting the crossing coordinate</title>
   <desc>A bowtie polygon crosses itself at a central point; Shapely is_valid returns false and explain_validity yields the reason plus that coordinate; the feature is written to a report unchanged.</desc>
   <defs>
     <marker id="ssi-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="900" height="340" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="450" y="26" text-anchor="middle" font-size="14" fill="currentColor" font-weight="700">Detect, locate the crossing, report — do not mutate</text>
   <!-- Bowtie glyph -->
   <rect x="30" y="56" width="230" height="240" rx="8" fill="none" stroke="currentColor" stroke-width="1.3" opacity="0.5"/>
@@ -181,6 +214,37 @@ if __name__ == "__main__":
 ## Verification
 
 Confirm the detector behaves before trusting its report:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="selfint-verify-t selfint-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="selfint-verify-t">Assertions that show a repair improved a geometry rather than replaced it</title>
+  <desc id="selfint-verify-d">A left-to-right chain of four post-repair assertions. The repaired geometry must be valid. Its area must be within a tolerance of the original, catching the case where a ring was dropped. Its geometry type must be unchanged, catching a polygon silently becoming a collection. And its vertex count must not fall by more than a small fraction, catching detail loss. A note says a repair that fails any of these should be quarantined rather than published.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="sivf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Valid is not enough — an empty polygon is valid</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">is_valid</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">the obvious check</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">necessary, weak alone</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#sivf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">area within tolerance</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">vs the original</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches a dropped ring</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#sivf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">geom_type unchanged</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">Polygon stays Polygon</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches collections</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#sivf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">vertex count</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">no large drop</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">catches detail loss</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Wire these four as a single assert_repaired() helper and call it from every repair path, so a new repair strategy inherits the checks automatically.</text>
+</svg>
+<figcaption>Validity alone is a weak assertion: an empty polygon is valid. Pair it with area, type and vertex count and the assertions actually describe "the same shape, fixed".</figcaption>
+</figure>
 
 - **Known bowtie flags.** The example `Polygon([(0,0),(2,2),(2,0),(0,2),(0,0)])` must appear in the report with defect `self_intersection` or `ring_self_intersection` and a crossing coordinate near `(1, 1)`.
 - **Valid square is silent.** The unit square must produce no report row; if it does, `is_valid` is being bypassed.

@@ -14,7 +14,7 @@ date: 2026-07-14
 
 Reaching for the wrong OSM reader is the quietest way to sink a pipeline. A team that prototypes on a city extract with pyrosm, loves how a `.osm.pbf` drops straight into a GeoDataFrame, and then points the same script at a continental file discovers the failure the hard way: the process climbs past available RAM and the kernel kills it mid-run, hours in, with nothing written. The inverse mistake is just as costly — hand-rolling a pyosmium streaming handler to clip a bounding box that `osmium extract` would have carved in a single fast pass, or looping a whole-file scan every time you need one object by id. None of these tools is wrong; each was built for a different access pattern, and the skill this guide teaches is matching the task and the scale to the reader before you write the first line. It belongs to the broader [Parsing & Tag Normalization Workflows](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/) stage, where ingestion sets the ceiling on everything downstream.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 480" role="img" aria-label="A decision tree that routes an OSM processing task to the right parser. First question: is it a whole-file transform such as clip, merge, dedup, or applying a diff? If yes, use osmium-tool, the command-line tool that is fastest for whole-file operations. If no, next question: do you need random access to a single object by its id? If yes, use osmx, an on-disk store built for point lookups. If no, next question: do you want a GeoDataFrame for city or region analysis? If yes, use pyrosm, which reads PBF straight into GeoDataFrames. Otherwise, use pyosmium for streaming filters and diffs with bounded, constant memory." xmlns:xlink="http://www.w3.org/1999/xlink" style="width:100%;max-width:1040px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 480" role="img" aria-label="A decision tree that routes an OSM processing task to the right parser. First question: is it a whole-file transform such as clip, merge, dedup, or applying a diff? If yes, use osmium-tool, the command-line tool that is fastest for whole-file operations. If no, next question: do you need random access to a single object by its id? If yes, use osmx, an on-disk store built for point lookups. If no, next question: do you want a GeoDataFrame for city or region analysis? If yes, use pyrosm, which reads PBF straight into GeoDataFrames. Otherwise, use pyosmium for streaming filters and diffs with bounded, constant memory." xmlns:xlink="http://www.w3.org/1999/xlink" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Decision tree mapping an OSM task and scale to pyosmium, pyrosm, osmium-tool, or osmx</title>
   <desc>Four sequential questions each branch right to a recommended tool. Whole-file transform such as clip, merge, dedup, or apply diff routes to osmium-tool. Random access by object id routes to osmx. Wanting a GeoDataFrame for city or region analysis routes to pyrosm. The default fall-through, a streaming filter or diff at planet scale with bounded memory, routes to pyosmium.</desc>
   <defs>
@@ -22,6 +22,7 @@ Reaching for the wrong OSM reader is the quietest way to sink a pipeline. A team
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1040" height="480" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="520" y="28" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Match the task and the scale to the reader</text>
   <!-- Q1 -->
   <rect x="60" y="70" width="340" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -77,6 +78,48 @@ This guide compares readers of the same byte streams, so a working mental model 
 ## Decision Matrix: Tool Against Axis
 
 The table below is the compressed form of the whole guide. Read down the column that names your binding constraint — memory, output shape, or scale — and the row it selects is your starting default. The prose after it explains the edges where the default flips.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="parser-fit-t parser-fit-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="parser-fit-t">Which parser fits which job, by the shape of the output you need</title>
+  <desc id="parser-fit-d">A grid of four output shapes against the three tools. For a filtered PBF written back to disk, osmium-tool is the direct fit, pyosmium needs a writer and pyrosm cannot do it. For a GeoDataFrame of a layer, pyrosm is the direct fit, pyosmium needs geometry assembly by hand and osmium-tool cannot produce one. For custom per-object logic, pyosmium is the fit, pyrosm cannot express it and osmium-tool cannot either. For a one-off count or extract in a shell script, osmium-tool is the fit and both libraries are overkill.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The right parser follows from the output shape, not from benchmarks</text>
+  <text x="317" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">osmium-tool</text>
+  <text x="531" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">pyosmium</text>
+  <text x="745" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">pyrosm</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">filtered PBF back to disk</text>
+  <rect x="213" y="84" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">direct fit</text>
+  <rect x="427" y="84" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">needs a writer</text>
+  <rect x="641" y="84" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="745" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">cannot</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">GeoDataFrame of a layer</text>
+  <rect x="213" y="124" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="317" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">cannot</text>
+  <rect x="427" y="124" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">assemble geometry yourself</text>
+  <rect x="641" y="124" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="745" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">direct fit</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">custom per-object logic</text>
+  <rect x="213" y="164" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="317" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">cannot</text>
+  <rect x="427" y="164" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="531" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">direct fit</text>
+  <rect x="641" y="164" width="208" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="745" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">cannot</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">a count in a shell script</text>
+  <rect x="213" y="204" width="208" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="317" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">direct fit</text>
+  <rect x="427" y="204" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="531" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">overkill</text>
+  <rect x="641" y="204" width="208" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="745" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">overkill</text>
+  <text x="440" y="260" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">A common and healthy combination: osmium-tool to cut and filter, pyrosm to load what is left into a frame.</text>
+</svg>
+<figcaption>The tools are not ranked; they answer different questions. Most pipelines end up using osmium-tool to prepare a file and one of the libraries to read it.</figcaption>
+</figure>
 
 | Tool | Access pattern | Memory profile | Output type | Best scale | Typical use |
 |---|---|---|---|---|---|
@@ -213,6 +256,31 @@ Most parser regrets show up as one of a handful of symptoms. Each row pairs a sy
 ## Performance & Scale Considerations
 
 The scaling behaviour of each reader is predictable once you know what it holds in memory. pyosmium holds one element plus, optionally, a node-location store whose size is a function of node count, not file size; that ceiling is fixed for a given planet, so a streaming filter's peak RSS is nearly independent of how much work it does per element. pyrosm holds the reconstructed GeoDataFrame for the feature classes you requested, so its peak scales with the *result*, which is why a dense urban extract can cost more than a sparse continental one covering ten times the area. osmium-tool streams blocks and buffers only a window of them, so its footprint is bounded regardless of input size — its cost is I/O and CPU, not memory. osmx front-loads all cost into the `expand` phase and then memory-maps the store, keeping only touched pages resident.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 282" role="img" aria-labelledby="parser-mem-t parser-mem-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="parser-mem-t">Peak memory of the three parsers on the same country extract</title>
+  <desc id="parser-mem-d">A bar chart of peak resident memory reading a 1.2 gigabyte country extract. osmium-tool filtering to a new file uses 240 megabytes because it streams. pyosmium with a handler and no node cache uses 310 megabytes. pyosmium with a dense node cache for way geometries uses 3.4 gigabytes. pyrosm loading the road network as a GeoDataFrame uses 6.8 gigabytes because the whole layer is materialised.</desc>
+  <rect x="0" y="0" width="880" height="282" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Memory follows what you materialise, not which library you chose</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">peak resident memory, 1.2 GB country extract</text>
+  <line x1="250" y1="68" x2="250" y2="228" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">osmium-tool filter to file</text>
+  <rect x="250" y="74" width="16" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="276" y="89" font-size="11" fill="currentColor" opacity="0.9">240 MB · pure stream</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">pyosmium handler, tags only</text>
+  <rect x="250" y="116" width="20" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="280" y="131" font-size="11" fill="currentColor" opacity="0.9">310 MB · pure stream</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">pyosmium + node cache</text>
+  <rect x="250" y="158" width="224" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="484" y="173" font-size="11" fill="currentColor" opacity="0.9">3.4 GB · way geometries</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">pyrosm → GeoDataFrame</text>
+  <rect x="250" y="200" width="448" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="708" y="215" font-size="11" fill="currentColor" opacity="0.9">6.8 GB · whole layer in memory</text>
+  <text x="440" y="264" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">If the last row does not fit, the fix is not a different library — it is filtering the extract down with the first row before loading it.</text>
+</svg>
+<figcaption>The split is between streaming and materialising, not between libraries. The moment you need way geometries you are holding node positions, and that is where the memory goes regardless of the tool.</figcaption>
+</figure>
 
 The practical rule of thumb: below roughly a country-sized extract, pyrosm's convenience usually wins and its memory cost is tolerable; above it, the reconstruction that made pyrosm pleasant becomes the thing that OOMs, and pyosmium streaming (or an osmium-tool pre-clip) takes over. But rules of thumb are no substitute for measurement on *your* extract and *your* machine — the sibling reference on [benchmarking OSM parser memory and throughput](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/choosing-an-osm-parser-pyosmium-pyrosm-osmium/benchmarking-osm-parser-memory-and-throughput/) gives a harness that records peak RSS and elements per second for pyosmium and pyrosm on the same file, so the crossover point stops being a guess.
 

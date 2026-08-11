@@ -31,7 +31,7 @@ OpenStreetMap encodes complex areal features through multipolygon relations: a s
 
 $$ \text{Area} = \sum_{o \in \text{outer}} |A_o| \; - \sum_{i \in \text{inner}} |A_i| $$
 
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Membership tree of a type=multipolygon relation: the relation points to five way members by solid membership edges (two role=outer ways forming exterior rings A and B, and three role=inner ways), then dashed contains edges show outer ring A containing inner holes 1 and 2 and outer ring B containing inner hole 3" style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Membership tree of a type=multipolygon relation: the relation points to five way members by solid membership edges (two role=outer ways forming exterior rings A and B, and three role=inner ways), then dashed contains edges show outer ring A containing inner holes 1 and 2 and outer ring B containing inner hole 3" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Multipolygon Relation Membership and Containment</title>
   <desc>A type=multipolygon relation has solid membership edges to five way members: two role=outer ways (exterior rings A and B) and three role=inner ways. Dashed "contains" edges show that outer ring A contains inner holes 1 and 2, while outer ring B contains inner hole 3. The role attribute, not the way winding, determines whether a member is an exterior ring or a hole.</desc>
   <defs>
@@ -39,6 +39,7 @@ $$ \text{Area} = \sum_{o \in \text{outer}} |A_o| \; - \sum_{i \in \text{inner}} 
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="300" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- relation node -->
   <rect x="270" y="18" width="220" height="52" rx="4" fill="currentColor" fill-opacity="0.10" stroke="currentColor" stroke-width="1.5"/>
   <text x="380" y="40" text-anchor="middle" font-size="13" fill="currentColor">Relation</text>
@@ -77,9 +78,38 @@ $$ \text{Area} = \sum_{o \in \text{outer}} |A_o| \; - \sum_{i \in \text{inner}} 
   <text x="380" y="288" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.7">Role (not winding) decides exterior vs. hole · each inner lies inside exactly one outer</text>
 </svg>
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 856 262" role="img" aria-labelledby="mp-roles-t mp-roles-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="mp-roles-t">Role tags against containment when classifying multipolygon rings</title>
+  <desc id="mp-roles-d">Two panels showing the same building with two courtyards. On the left, the member roles are taken literally: one inner ring carries an empty role and another is mistagged as outer, producing overlapping outer rings and an invalid geometry. On the right, rings are classified by even-odd containment depth: the enclosing ring is depth zero and therefore outer, and both courtyards are depth one and therefore holes, regardless of what the role tags say.</desc>
+  <rect x="0" y="0" width="856" height="262" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="mpr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Roles are a hint; containment is the answer</text>
+  <rect x="26" y="48" width="386" height="196" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.4"/>
+  <text x="219" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Trusting role= as written</text>
+  <path d="M70,96 H360 V214 H70 Z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  <text x="80" y="112" font-size="10.5" fill="currentColor" opacity="0.85">role="outer"</text>
+  <path d="M120,132 H210 V182 H120 Z" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.6"/>
+  <text x="165" y="160" text-anchor="middle" font-size="10.5" fill="currentColor">role=""</text>
+  <path d="M250,132 H330 V182 H250 Z" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.6"/>
+  <text x="290" y="160" text-anchor="middle" font-size="10.5" fill="currentColor">role="outer"</text>
+  <text x="219" y="232" text-anchor="middle" font-size="10.5" fill="currentColor">two courtyards become overlapping outer rings → invalid</text>
+  <rect x="444" y="48" width="386" height="196" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.4"/>
+  <text x="637" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Classifying by even-odd containment</text>
+  <path d="M488,96 H778 V214 H488 Z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  <text x="498" y="112" font-size="10.5" fill="currentColor" opacity="0.85">depth 0 → outer</text>
+  <path d="M538,132 H628 V182 H538 Z" fill="var(--osm-canvas,#fffdf8)" stroke="var(--osm-ok,#15803d)" stroke-width="1.6"/>
+  <text x="583" y="160" text-anchor="middle" font-size="10.5" fill="currentColor">depth 1 → hole</text>
+  <path d="M668,132 H748 V182 H668 Z" fill="var(--osm-canvas,#fffdf8)" stroke="var(--osm-ok,#15803d)" stroke-width="1.6"/>
+  <text x="708" y="160" text-anchor="middle" font-size="10.5" fill="currentColor">depth 1 → hole</text>
+  <text x="637" y="232" text-anchor="middle" font-size="10.5" fill="currentColor">ring nesting decides the role, so a mistagged member cannot break it</text>
+</svg>
+<figcaption>Roles in OSM are contributor-supplied and routinely wrong or blank. Counting how many rings a candidate falls inside is cheap and cannot be mistagged.</figcaption>
+</figure>
+
 Topological validity adds three hard constraints: rings must be closed and non-self-intersecting, they may share nodes only at explicit boundary intersections, and an `inner` ring must lie wholly inside exactly one `outer` ring. Overlapping interiors or an unclosed ring violate the OGC Simple Features specification and abort geometry construction in standard GIS engines. Tag authority follows the same role discipline — the relation's key-value pairs are canonical, and member-way tags apply only when a way is used standalone — so a strict key allowlist drawn from [Tag Taxonomy & Key-Value Standards](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/) prevents inner-ring attributes from bleeding onto the assembled feature.
 
-<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Annotated multipolygon assembly: two disjoint outer rings A and B are reconstructed from role=outer ways, each with role=inner ways punched out as holes; outer rings are wound counter-clockwise and inner holes clockwise, and the total signed area equals the sum of outer ring areas minus the sum of all hole areas" style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Annotated multipolygon assembly: two disjoint outer rings A and B are reconstructed from role=outer ways, each with role=inner ways punched out as holes; outer rings are wound counter-clockwise and inner holes clockwise, and the total signed area equals the sum of outer ring areas minus the sum of all hole areas" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Assembling a Multipolygon: Outer Rings Minus Inner Holes</title>
   <desc>Two disjoint outer rings, A (with two holes) and B (with one hole), are reconstructed from role=outer way members; role=inner members are subtracted as cutouts so background shows through each hole. Outer rings are oriented counter-clockwise (CCW) and inner holes clockwise (CW). The assembled signed area is the sum of the outer ring areas minus the sum of all hole areas.</desc>
   <defs>
@@ -87,6 +117,7 @@ Topological validity adds three hard constraints: rings must be closed and non-s
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="380" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- Outer ring A with two holes (evenodd punches the cutouts) -->
   <path d="M60,160 L108,78 L218,66 L300,128 L288,232 L176,262 L92,218 Z
            M132,128 L178,122 L184,158 L142,166 Z

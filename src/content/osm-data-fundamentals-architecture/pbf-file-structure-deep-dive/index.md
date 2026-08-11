@@ -5,7 +5,7 @@ pageDescription: "Byte-level guide to the OSM PBF wire format: BlobHeader/Blob f
 
 OpenStreetMap distributes its primary geospatial datasets in Protocolbuffer Binary Format (PBF), a compressed, schema-driven container engineered for high-throughput spatial ETL. The pipeline challenge this guide solves is precise and unforgiving: a single misread length prefix or a missed delta-accumulator reset does not raise an exception — it silently shifts every coordinate that follows, so a continent of nodes lands in the wrong hemisphere and the corruption surfaces only after the data reaches a map. For mapping engineers, GIS analysts, and Python developers building production ingestion, the only defence is to read the format exactly as the specification defines it, block by block, with validation gates between every stage. This reference dissects the PBF wire format at the byte level, establishes memory-bounded parsing patterns, and defines the error-handling checkpoints that make extract processing reproducible. It sits within the broader [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) layer, which frames why this binary encoding underpins every fast OSM workflow.
 
-<svg viewBox="0 0 700 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Byte-stream layout of an OSM PBF file as a left-to-right sequence of length-prefixed blocks: the file opens with a single OSMHeader frame (a 4-byte big-endian length prefix, a BlobHeader, then a Blob carrying the HeaderBlock) and continues with repeating OSMData frames, each prefix plus BlobHeader plus Blob carrying one PrimitiveBlock, where the BlobHeader is capped at 64 KiB and the decompressed Blob payload at 32 MiB" style="width:100%;max-width:700px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 700 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Byte-stream layout of an OSM PBF file as a left-to-right sequence of length-prefixed blocks: the file opens with a single OSMHeader frame (a 4-byte big-endian length prefix, a BlobHeader, then a Blob carrying the HeaderBlock) and continues with repeating OSMData frames, each prefix plus BlobHeader plus Blob carrying one PrimitiveBlock, where the BlobHeader is capped at 64 KiB and the decompressed Blob payload at 32 MiB" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>OSM PBF File: Length-Prefixed Block Stream</title>
   <desc>A .osm.pbf file is a continuous concatenation of frames read left to right. The first frame is exactly one OSMHeader: a 4-byte big-endian uint32 length prefix, then a BlobHeader with type=OSMHeader, then a Blob carrying the HeaderBlock. Every following frame is an OSMData frame with the same three parts, each Blob carrying one PrimitiveBlock, repeating to end of file. The BlobHeader must not exceed 64 KiB and the decompressed Blob payload must not exceed 32 MiB; both are validated before any buffer is allocated.</desc>
   <defs>
@@ -13,6 +13,7 @@ OpenStreetMap distributes its primary geospatial datasets in Protocolbuffer Bina
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="700" height="210" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- file start label -->
   <text x="60" y="58" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.7">file start</text>
   <text x="60" y="100" text-anchor="middle" font-size="14" fill="currentColor" opacity="0.55">&#9656;</text>
@@ -65,6 +66,40 @@ This guide assumes three foundations. First, the [Node-Way-Relation Data Model](
 
 The two framing messages are defined in `fileformat.proto`. `BlobHeader` carries three fields: `type` (a string, either `OSMHeader` or `OSMData`), an optional `indexdata` byte string, and `datasize` (the compressed length of the `Blob` that follows). The `Blob` message then holds the payload in exactly one of several mutually exclusive fields:
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 252" role="img" aria-labelledby="blob-frame-t blob-frame-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="blob-frame-t">The four-step framing that precedes every PBF primitive block</title>
+  <desc id="blob-frame-d">A left-to-right chain: a four-byte big-endian length prefix gives the size of the BlobHeader; the BlobHeader carries a type of either OSMHeader or OSMData plus a datasize; the Blob that follows is exactly datasize bytes and holds zlib data with a raw size; inflating it yields a PrimitiveBlock with a string table, primitive groups and a granularity, conventionally capped at eight thousand elements. A panel below explains that because each blob is independently deflated and self-describing, a reader can seek to any block boundary without decoding earlier blocks, which is what makes parallel parsing possible.</desc>
+  <rect x="0" y="0" width="880" height="252" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="blb" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Every block is four reads: length, BlobHeader, Blob, inflate</text>
+  <rect x="24" y="52" width="96" height="54" rx="6" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="72" y="74" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">4 bytes</text>
+  <text x="72" y="92" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">big-endian</text>
+  <text x="72" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">len(BlobHeader)</text>
+  <line x1="120" y1="79" x2="152" y2="79" stroke="currentColor" stroke-width="1.5" marker-end="url(#blb)"/>
+  <rect x="154" y="52" width="176" height="54" rx="6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="242" y="74" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">BlobHeader</text>
+  <text x="242" y="92" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">type · datasize</text>
+  <text x="242" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">"OSMHeader" or "OSMData"</text>
+  <line x1="330" y1="79" x2="362" y2="79" stroke="currentColor" stroke-width="1.5" marker-end="url(#blb)"/>
+  <rect x="364" y="52" width="176" height="54" rx="6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="452" y="74" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">Blob</text>
+  <text x="452" y="92" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">zlib_data · raw_size</text>
+  <text x="452" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">datasize bytes exactly</text>
+  <line x1="540" y1="79" x2="572" y2="79" stroke="currentColor" stroke-width="1.5" marker-end="url(#blb)"/>
+  <rect x="574" y="52" width="282" height="54" rx="6" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="715" y="74" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">inflate → PrimitiveBlock</text>
+  <text x="715" y="92" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.85">stringtable · primitivegroup[] · granularity</text>
+  <text x="715" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">≤ 8 000 elements by convention</text>
+  <rect x="24" y="150" width="832" height="82" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.4"/>
+  <text x="440" y="174" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Why the framing matters more than the payload</text>
+  <text x="440" y="196" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.9">Because each Blob is independently deflated and self-describing, a reader can seek to any block boundary without decoding the ones before it.</text>
+  <text x="440" y="216" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.9">That single property is what makes parallel PBF parsing possible at all — and what a short read of <tspan font-family="monospace">datasize</tspan> silently destroys.</text>
+</svg>
+<figcaption>Read this framing once and the parallel-parsing strategies later in the section stop looking clever — block independence is simply a property the container was designed to have.</figcaption>
+</figure>
+
 | Blob field | Meaning | Notes |
 |---|---|---|
 | `raw` | Uncompressed payload | `raw_size` is omitted; rare in practice |
@@ -110,6 +145,42 @@ A missing, malformed, or out-of-spec header is a hard stop. Unlike a single bad 
 ## Primitive Groups, StringTable & Delta Encoding
 
 Each `PrimitiveBlock` opens with a `StringTable`: a single array of byte strings, indexed from 1, that deduplicates every tag key and value used in the block (index 0 is reserved as a delimiter for dense node key/value packing). Tags throughout the block are stored as integer indices into this table rather than repeated strings, which is the largest single contributor to PBF's compactness. Applying the conventions in [Tag Taxonomy & Key-Value Standards](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/) at this point — while you still hold the raw indices — lets you validate or normalize keys before they fan out into downstream tables.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 284" role="img" aria-labelledby="delta-dec-t delta-dec-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="delta-dec-t">Delta-encoded DenseNodes identifiers and the running sum that restores them</title>
+  <desc id="delta-dec-d">The top row shows what is on the wire: a first absolute identifier of 240111883 followed by signed varint deltas of plus four, plus one, plus seven and minus two, each costing a single byte where the absolute value would cost five. The bottom row shows the reconstructed identifiers after the running sum. A warning panel notes that the accumulator resets at every primitive block boundary, separately for id, latitude, longitude and timestamp, and that carrying one across a boundary yields plausible but wrong identifiers.</desc>
+  <rect x="0" y="0" width="880" height="284" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">DenseNodes stores differences; the accumulator turns them back into values</text>
+  <text x="34" y="62" font-size="11.5" font-weight="600" fill="currentColor">on the wire — signed varints, mostly one byte each</text>
+  <rect x="34" y="72" width="120" height="34" rx="5" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="94" y="94" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">240 111 883</text>
+  <rect x="164" y="72" width="76" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <text x="202" y="94" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">+4</text>
+  <rect x="250" y="72" width="76" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <text x="288" y="94" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">+1</text>
+  <rect x="336" y="72" width="76" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <text x="374" y="94" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">+7</text>
+  <rect x="422" y="72" width="76" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <text x="460" y="94" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">-2</text>
+  <text x="520" y="94" font-size="11" fill="currentColor" opacity="0.85">…each delta costs 1 byte; the absolute ids would cost 5</text>
+  <text x="34" y="148" font-size="11.5" font-weight="600" fill="currentColor">after the running sum</text>
+  <rect x="34" y="158" width="120" height="34" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="94" y="180" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">240 111 883</text>
+  <rect x="164" y="158" width="120" height="34" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="224" y="180" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">240 111 887</text>
+  <rect x="294" y="158" width="120" height="34" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="354" y="180" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">240 111 888</text>
+  <rect x="424" y="158" width="120" height="34" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="484" y="180" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">240 111 895</text>
+  <rect x="554" y="158" width="120" height="34" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="614" y="180" text-anchor="middle" font-size="12" font-family="monospace" fill="currentColor">240 111 893</text>
+  <rect x="34" y="212" width="812" height="52" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.4"/>
+  <text x="440" y="234" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">The accumulator resets at every PrimitiveBlock boundary — id, lat, lon and timestamp each have their own</text>
+  <text x="440" y="253" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.9">Carry one across a block and the ids stay plausible while pointing at entirely different objects. Nothing in the file will tell you.</text>
+</svg>
+<figcaption>Delta encoding is why a PBF is small, and the per-block accumulator reset is why a hand-rolled reader that works on one block quietly corrupts the second.</figcaption>
+</figure>
 
 After the `StringTable` come the `primitivegroup` entries. Each `PrimitiveGroup` is homogeneous: it holds *either* a packed `DenseNodes` message, *or* a list of `Way`, *or* `Relation`, *or* standalone `Node` messages — never a mix. Object IDs, node references, and coordinates are stored as **signed deltas**: each value is the difference from its predecessor within the same group, zig-zag encoded into a varint. `DenseNodes` takes this furthest, delta-encoding `id`, `lat`, `lon`, and the `denseinfo` fields as parallel packed arrays.
 

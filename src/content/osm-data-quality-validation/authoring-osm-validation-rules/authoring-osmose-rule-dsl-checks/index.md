@@ -29,9 +29,40 @@ Have each of these in place; an analyser that runs cleanly but produces zero mar
 
 Osmose is a server-side quality-assurance system: it ingests an OSM extract into PostgreSQL, runs a battery of analysers over the database, and publishes each analyser's findings as issue markers on a web map. An analyser is a Python class, and the two families that matter are the `Analyser_Osmosis` base, which runs raw SQL against the `osmosis` snapshot schema, and the `Analyser_Merge` family, which cross-references OSM against an external open dataset. This page uses the `Analyser_Osmosis` pattern because most house rules are expressible as a query: the offending features are exactly the rows a `SELECT` returns, and the analyser's job is to turn each returned row into a typed error. Unlike the editor-time checks in a [JOSM validation preset](https://www.osm-data-processing.org/osm-data-quality-validation/authoring-osm-validation-rules/writing-custom-josm-validation-presets/), an Osmose check runs over the whole database on a schedule, so it catches issues in data nobody is actively editing.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="osmose-parts-t osmose-parts-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osmose-parts-t">The four parts every Osmose rule declares</title>
+  <desc id="osmose-parts-d">A left-to-right chain of the four declarations an Osmose analyser rule must make. A selector narrows the objects considered, usually by tag presence. A condition expresses the defect itself as SQL or a predicate. A class assigns a stable numeric identifier and a severity level, which is what the front end groups issues by. And a localised text explains the problem to a mapper in their own language. Omitting the class means the issue cannot be tracked across runs.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="osp" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Selector, condition, class, text — the class is the one that must be stable</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">selector</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">which objects</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">tag presence, type</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#osp)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">condition</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">what is wrong</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">SQL or predicate</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#osp)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">class</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">stable id + level</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">never renumber it</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#osp)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">text</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">per-language message</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">what the mapper should do</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Renumbering a class silently resets every false-positive mark mappers have made against it — treat the number as an API.</text>
+</svg>
+<figcaption>The class identifier is the part that is easy to treat as bookkeeping and is actually load-bearing: it is how the same defect found next week is recognised as the same defect, and how a mapper marks one as a false positive.</figcaption>
+</figure>
+
 Every issue Osmose raises is identified by a small set of fields that the frontend keys on. `class_id` is a number unique within the analyser; it groups all instances of one problem so mappers can filter by it. `item` is a broad category number (for example the ranges used for tagging, geometry, or routing problems) that colours and groups issues across analysers. `level` is severity from 1 (most serious) to 3 (minor). The analyser declares each class once in its constructor with a translated title, then, for every offending row the SQL returns, calls `self.error` with that `class_id` and the feature's type, id, and coordinates. The backend writes those errors to its issue tables; the frontend reads them and drops a marker at each feature's location. The pipeline below shows that path end to end.
 
-<svg viewBox="0 0 980 300" role="img" aria-label="The Osmose analyser pipeline. A PostgreSQL database holding the osmosis snapshot schema, loaded from a PBF extract, feeds a SQL rule inside an Analyser_Osmosis class. The query selects offending features, for example fuel nodes with no name. Each returned row is turned into a typed issue class carrying a class_id, item category, and severity level through a self.error call. The backend writes these to its issue tables, and the Osmose frontend renders each issue as a marker on the QA map." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:980px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="14 40 952 198" role="img" aria-label="The Osmose analyser pipeline. A PostgreSQL database holding the osmosis snapshot schema, loaded from a PBF extract, feeds a SQL rule inside an Analyser_Osmosis class. The query selects offending features, for example fuel nodes with no name. Each returned row is turned into a typed issue class carrying a class_id, item category, and severity level through a self.error call. The backend writes these to its issue tables, and the Osmose frontend renders each issue as a marker on the QA map." xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Osmose analyser pipeline from database to QA map</title>
   <desc>A PostgreSQL osmosis schema feeds a SQL rule in an Analyser_Osmosis class, whose returned rows become a typed issue class via self.error, which the backend stores and the frontend renders as markers on the QA map.</desc>
   <defs>
@@ -39,6 +70,7 @@ Every issue Osmose raises is identified by a small set of fields that the fronte
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="14" y="40" width="952" height="198" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- DB cylinder -->
     <ellipse cx="90" cy="70" rx="60" ry="14" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-width="1.5"/>
@@ -168,6 +200,34 @@ Confirm the check produces the markers you expect:
 | Title shows as raw msgid | String not wrapped for translation | Wrap user-facing text in `T_(...)`. |
 | Duplicate markers per feature | Callback emits inside a loop over joined rows | Ensure the SQL returns one row per offending feature. |
 | Wrong colour grouping on map | `item` category number outside its band | Reuse an established `item` band for the issue type. |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 238" role="img" aria-labelledby="osmose-err-t osmose-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osmose-err-t">Three Osmose rule mistakes and the effect each has on mappers</title>
+  <desc id="osmose-err-d">A grid of three authoring mistakes against their effect and the fix. A selector that is too broad produces thousands of issues and mappers stop opening the layer, fixed by narrowing the selector rather than raising the severity. A condition that encodes a regional convention as a global rule flags correct mapping in other countries, fixed by scoping to a country. A message that states the defect without saying what to do produces issues nobody actions, fixed by naming the corrective edit.</desc>
+  <rect x="0" y="0" width="880" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">A correct rule that nobody acts on has not found anything</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">what mappers experience</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">the fix</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">selector too broad</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">thousands of issues, layer ignored</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">narrow the selector</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">regional convention as global rule</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">correct mapping flagged abroad</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">scope the rule by country</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">message states the defect only</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">issue read, nothing done</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">name the corrective edit</text>
+  <text x="440" y="220" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Write the mapper-facing text first. If you cannot say what edit fixes it, the rule is not ready.</text>
+</svg>
+<figcaption>All three produce a technically correct rule that fails at the only thing that matters — a mapper making the fix.</figcaption>
+</figure>
 
 For issues that also need catching while a mapper edits, pair this server-side class with the editor guardrail in [Writing Custom JOSM Validation Presets](https://www.osm-data-processing.org/osm-data-quality-validation/authoring-osm-validation-rules/writing-custom-josm-validation-presets/) so both the live and the batch path enforce the same rule.
 

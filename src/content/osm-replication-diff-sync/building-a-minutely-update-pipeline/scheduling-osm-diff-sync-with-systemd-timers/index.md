@@ -27,15 +27,55 @@ Run the minutely OSM sync loop reliably on a Linux host — restarted after rebo
 
 A cron job answers only one question — *when* — and answers it badly for a long-running data task: it captures no structured logs, has no concept of a run that outlives its interval, restarts nothing when the host reboots, and cheerfully launches a second copy while the first is still working. systemd splits the job into two objects that each do one thing. A **service unit** (`.service`) describes *how* to run the process: which user, which working directory, what to do when it exits non-zero, how long it may run. A **timer unit** (`.timer`) describes *when* to activate that service, and — crucially — it is itself a supervised unit, so `systemctl` can tell you when it last fired and when it will fire next. Because the timer activates the service rather than forking a shell, every run inherits journald logging, cgroup accounting, and the restart policy for free. The relationship up to the loop it schedules is covered in the parent [minutely update pipeline](https://www.osm-data-processing.org/osm-replication-diff-sync/building-a-minutely-update-pipeline/) guide; here the mechanism is the pairing itself.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 318" role="img" aria-labelledby="timer-vs-cron-t timer-vs-cron-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="timer-vs-cron-t">systemd timers against cron for a diff-sync job</title>
+  <desc id="timer-vs-cron-d">A grid comparing cron and a systemd timer across five properties. Overlap prevention: cron has none and needs an external flock, while a systemd service is a unit that will not start twice. Missed runs after downtime: cron skips them silently, a timer with Persistent=true runs once on boot. Logging: cron mails output to a mailbox nobody reads, a timer writes to journald with the unit name. Failure visibility: cron exposes an exit code only, a timer exposes a failed state and can trigger OnFailure. Startup delay spread: cron has none, a timer has RandomizedDelaySec.</desc>
+  <rect x="0" y="0" width="880" height="318" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">For a job that must never run twice, the unit model is the point</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">cron</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">systemd timer</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">overlapping runs</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">none — add flock yourself</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">unit will not start twice</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">missed runs after downtime</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">silently skipped</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">Persistent=true replays once</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">where output goes</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">mail to an unread mailbox</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">journald, tagged by unit</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">failure is visible as</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">an exit code, if you look</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">failed state + OnFailure=</text>
+  <text x="198" y="264" text-anchor="end" font-size="11.5" fill="currentColor">thundering-herd control</text>
+  <rect x="213" y="244" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="264" text-anchor="middle" font-size="10.5" fill="currentColor">none</text>
+  <rect x="535" y="244" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="264" text-anchor="middle" font-size="10.5" fill="currentColor">RandomizedDelaySec=</text>
+  <text x="440" y="300" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">None of this makes cron wrong for simple jobs — it makes it the wrong tool for one holding a checkpoint.</text>
+</svg>
+<figcaption>The decisive property for replication is the first one. A cron entry that fires every minute against a job that sometimes takes ninety seconds will eventually run two appliers against one state file.</figcaption>
+</figure>
+
 The one hazard a naive timer still leaves open is **overlap**. If a sync run occasionally takes longer than the interval — a large catch-up after an outage, say — the timer will start a second run while the first is mid-apply, and two processes writing the same base extract and checkpoint is exactly the corruption the pipeline's crash-safety was designed to prevent. The fix is a mutual-exclusion lock: wrap the loop in `flock` against a lockfile, and a second invocation exits immediately rather than racing the first. `Type=oneshot` with a timer, plus `flock`, gives a run-to-completion model with hard non-overlap.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" role="img" aria-label="How a systemd timer schedules the OSM diff-sync service. The timer unit fires on its OnUnitActiveSec cadence and activates the service unit. The service runs the sync script under an flock guard so that if a previous run still holds the lock the new invocation exits immediately with no overlap. The running script writes all output to journald, and on a non-zero exit the Restart policy relaunches it while a failed unit is isolated to its own status." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 270" role="img" aria-label="How a systemd timer schedules the OSM diff-sync service. The timer unit fires on its OnUnitActiveSec cadence and activates the service unit. The service runs the sync script under an flock guard so that if a previous run still holds the lock the new invocation exits immediately with no overlap. The running script writes all output to journald, and on a non-zero exit the Restart policy relaunches it while a failed unit is isolated to its own status." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>systemd timer activating a lock-guarded diff-sync service with journald logging</title>
   <desc>The timer fires on its cadence and activates the service. The service acquires an flock; if the lock is held by a prior run the new invocation exits with no overlap. The script logs to journald, and a non-zero exit triggers the Restart policy while the failure stays isolated to this unit.</desc>
   <defs>
     <marker id="sdt-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="900" height="270" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="450" y="26" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Timer activates a lock-guarded service; the lock is what prevents overlap</text>
+  <g transform="translate(0,-70)">
   <!-- timer -->
   <rect x="30" y="120" width="170" height="72" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
   <text x="115" y="150" text-anchor="middle" font-size="13" fill="currentColor" font-weight="600">.timer unit</text>
@@ -71,6 +111,7 @@ The one hazard a naive timer still leaves open is **overlap**. If a sync run occ
   <rect x="730" y="248" width="150" height="52" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
   <text x="805" y="272" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="600">journald</text>
   <text x="805" y="290" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">journalctl -u</text>
+  </g>
 </svg>
 
 ## Runnable solution
@@ -177,6 +218,37 @@ sudo systemctl enable --now osm-diff-sync.timer
 ## Verification
 
 Confirm the schedule and a healthy run:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="timer-verify-t timer-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="timer-verify-t">Reading systemctl output to tell a healthy timer from three failure shapes</title>
+  <desc id="timer-verify-d">A left-to-right chain of the four commands that answer whether the timer is working. list-timers shows NEXT and LAST; a LAST of n/a means the timer has never fired. status on the service shows the last exit; inactive dead with a zero exit is success, and failed shows the code. journalctl with the unit and since flags shows the run output. And a check on the state file modification time proves the run actually advanced the checkpoint rather than exiting early on the lock.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="tvf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four commands, in this order, because each rules out a different failure</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">systemctl list-timers</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">NEXT and LAST columns</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">LAST = n/a → never fired</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#tvf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">systemctl status</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">last exit code</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">failed → read the code</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#tvf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">journalctl -u --since</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">the run output itself</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">lock contention shows here</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#tvf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">stat the state file</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">mtime advancing?</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">if not, every run no-opped</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">A green timer and a stale state file is the combination to watch for — it is what a permanently held flock looks like from outside.</text>
+</svg>
+<figcaption>The last step is the one that catches the quiet failure: a timer that fires on schedule, a service that exits zero, and a lock that was held every single time, so nothing ever ran.</figcaption>
+</figure>
 
 - **The timer is armed.** `systemctl list-timers osm-diff-sync.timer` shows a `NEXT` firing time in the future and a recent `LAST`. If `NEXT` is blank, the timer is not enabled.
 - **The service succeeds.** `systemctl status osm-diff-sync.service` reports `Active: inactive (dead)` between runs and `status=0/SUCCESS` for the last invocation. A oneshot that just finished shows `active (exited)` briefly.

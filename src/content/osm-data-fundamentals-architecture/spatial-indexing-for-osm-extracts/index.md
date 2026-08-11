@@ -5,9 +5,10 @@ pageDescription: "Build production spatial indexes over OSM extracts: choosing b
 
 OpenStreetMap extracts are large, densely interconnected geospatial datasets, and the pipeline challenge this guide solves is blunt: without a spatial index, every bounding-box query, point-in-polygon test, and topology join degenerates into a full linear scan of millions of primitives. A single `highway=*` clip against an unindexed European extract can mean reading and testing hundreds of millions of geometries per request, turning a sub-second lookup into minutes of wasted I/O — and the cost compounds on every query thereafter. The failure is silent until scale arrives: a prototype that runs fine on a city extract grinds to a halt on a continent, because the work grew linearly while the data grew super-linearly. The defence is to build a deterministic spatial index once, so spatial predicates resolve in logarithmic time and downstream analytics, quality checks, and exports read only the candidates that can possibly match. This guide sits within the broader [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) layer, which frames why fast spatial access underpins every serious OSM workflow.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 360" style="width:100%;max-width:1040px;display:block;margin:1.5rem auto;font-family:inherit" role="img" aria-label="Comparison of the three spatial-index families used for OSM extracts. The R-tree is a bounding-box hierarchy of minimum bounding rectangles that adapts to irregular extents and is best for exact spatial joins and varying-density queries. The quadkey / grid family divides the extent into fixed-resolution cells on power-of-two splits and is best for tiling and point-in-polygon pre-filtering. The H3 / S2 family uses uniform hexagonal or spherical cells with deterministic neighbours and is best for global aggregation and completeness sampling.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 360" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit" role="img" aria-label="Comparison of the three spatial-index families used for OSM extracts. The R-tree is a bounding-box hierarchy of minimum bounding rectangles that adapts to irregular extents and is best for exact spatial joins and varying-density queries. The quadkey / grid family divides the extent into fixed-resolution cells on power-of-two splits and is best for tiling and point-in-polygon pre-filtering. The H3 / S2 family uses uniform hexagonal or spherical cells with deterministic neighbours and is best for global aggregation and completeness sampling.">
   <title>R-tree, quadkey grid, and H3 / S2 spatial index families compared</title>
   <desc>Three side-by-side panels. The R-tree panel shows nested minimum bounding rectangles, a bounding-box hierarchy that adapts to irregular extents, best for exact spatial joins and varying-density queries. The quadkey / grid panel shows a square subdivided into fixed-resolution cells on power-of-two splits, best for tiling and point-in-polygon pre-filtering. The H3 / S2 panel shows tessellating hexagons, uniform hex or spherical cells with deterministic neighbours, best for global aggregation and completeness sampling.</desc>
+  <rect x="0" y="0" width="1040" height="360" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="520" y="26" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Three index families, matched to the query — not competing</text>
   <!-- Card 1: R-tree -->
   <rect x="20" y="48" width="320" height="292" rx="8" fill="none" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -199,6 +200,31 @@ class OSMWayIndexer(osmium.SimpleHandler):
 
 An R-tree returns *candidates*, not answers. Every spatial query is two stages: the index prunes the search to features whose MBRs overlap the query window, then an exact geometric predicate removes the false positives that a rectangle inevitably admits. Skipping the refine step is a common correctness bug — the index will happily return a feature whose bounding box overlaps but whose actual geometry does not.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 282" role="img" aria-labelledby="sidx-funnel-t sidx-funnel-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="sidx-funnel-t">Candidate counts through the two-stage spatial query funnel</title>
+  <desc id="sidx-funnel-d">A four-stage funnel over a 4.1 million geometry extract. A full scan touches all 4.1 million. The R-tree bounding-box query returns 3140 candidates. A prepared-geometry intersects test keeps 214. The attribute filter leaves 176 final rows. Bar length is candidates surviving each stage.</desc>
+  <rect x="0" y="0" width="880" height="282" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Two-stage querying: what each filter actually removes</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">geometries still under consideration after each stage — city-boundary join, 4.1 M input</text>
+  <line x1="250" y1="68" x2="250" y2="228" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">no index — full scan</text>
+  <rect x="250" y="74" width="442" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="702" y="89" font-size="11" fill="currentColor" opacity="0.9">4 100 000 exact tests · 38 s</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">R-tree bbox query</text>
+  <rect x="250" y="116" width="6" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="266" y="131" font-size="11" fill="currentColor" opacity="0.9">3 140 candidates · 4 ms</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">prepared intersects()</text>
+  <rect x="250" y="158" width="6" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="266" y="173" font-size="11" fill="currentColor" opacity="0.9">214 true hits · 11 ms</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">attribute predicate</text>
+  <rect x="250" y="200" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="215" font-size="11" fill="currentColor" opacity="0.9">176 rows returned</text>
+  <text x="440" y="264" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Bar length is candidate count on a linear scale, which is why the last three are barely visible — that is the result, not a drawing error.</text>
+</svg>
+<figcaption>The index never answers the question — it only shrinks it. Every millisecond saved comes from the exact predicate running 4.1 million times fewer.</figcaption>
+</figure>
+
 ```python
 from shapely.geometry import box
 
@@ -276,7 +302,7 @@ def spatial_join(index: rtree.index.Index, probes: list) -> list[dict]:
 
 For ingestion that produces the geometry stream this index consumes, the concurrent reader in [async PBF parsing with pyrosm](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/) and the windowed approach in [memory-efficient chunk processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) apply the same block-boundary partitioning the parallel-construction section recommends.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 460" style="width:100%;max-width:1100px;display:block;margin:1.5rem auto;font-family:inherit" role="img" aria-label="Data-flow diagram of the spatial-indexing stage. A build pipeline streams the PBF extract, reconstructs geometry, and inserts minimum bounding rectangles into a disk-backed R-tree, persisting it as a memory-mapped index; invalid or unclosed geometries branch off reconstruction into a quarantine. A serve pipeline takes a bounding-box query window, reads candidate ids from the persistent index in a coarse MBR-overlap filter, removes false positives in an exact predicate-refine stage, and feeds the survivors to downstream spatial join and tag analytics.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 460" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit" role="img" aria-label="Data-flow diagram of the spatial-indexing stage. A build pipeline streams the PBF extract, reconstructs geometry, and inserts minimum bounding rectangles into a disk-backed R-tree, persisting it as a memory-mapped index; invalid or unclosed geometries branch off reconstruction into a quarantine. A serve pipeline takes a bounding-box query window, reads candidate ids from the persistent index in a coarse MBR-overlap filter, removes false positives in an exact predicate-refine stage, and feeds the survivors to downstream spatial join and tag analytics.">
   <title>Indexing-stage data flow: build pipeline, persistent index, and query pipeline</title>
   <desc>Top row, the build pipeline: PBF extract stream feeds geometry reconstruction (ways to LineString or Polygon), which feeds R-tree insert (disk-backed). Invalid or self-intersecting geometries branch down from reconstruction into a quarantine box. R-tree insert persists down into a memory-mapped persistent R-tree drawn as a cylinder. Bottom row, the query pipeline: a bounding-box query window feeds a coarse filter that reads candidate ids from the persistent index by MBR overlap; the candidates pass to an exact refine stage using intersects or contains predicates; the matches feed downstream spatial join and tag analytics.</desc>
   <defs>
@@ -284,6 +310,7 @@ For ingestion that produces the geometry stream this index consumes, the concurr
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1100" height="460" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="550" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">Build once, then serve every query as coarse filter then exact refine</text>
   <text x="140" y="46" text-anchor="middle" font-size="11.5" fill="currentColor" font-weight="700" opacity="0.8">BUILD</text>
   <text x="135" y="296" text-anchor="middle" font-size="11.5" fill="currentColor" font-weight="700" opacity="0.8">SERVE</text>

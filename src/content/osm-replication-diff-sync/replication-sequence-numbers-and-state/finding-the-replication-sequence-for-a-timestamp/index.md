@@ -27,14 +27,46 @@ You have a wall-clock datetime — the moment a base extract was cut, or the poi
 
 The replication server does not offer a "give me the sequence for this time" endpoint, so the mapping from timestamp to sequence has to be discovered. The reliable method exploits the one invariant that always holds: sequence numbers and their timestamps are jointly monotonic, so the `state.txt` files form a sorted-by-time array indexed by sequence. Finding the sequence whose timestamp is at-or-before your target is therefore a binary search over that array, where each "array read" is an HTTP fetch of one `state.txt`. pyosmium wraps exactly this search in `ReplicationServer.timestamp_to_sequence`, and understanding the underlying probe is what lets you reimplement it when pyosmium is unavailable or you are talking to a non-standard feed.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="bisect-seq-t bisect-seq-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="bisect-seq-t">Binary search over the replication stream to find the sequence for a timestamp</title>
+  <desc id="bisect-seq-d">A left-to-right chain. The search starts from the stream head sequence and a known-old lower bound. Each step fetches one state.txt at the midpoint and compares its timestamp against the target, halving the range. About 24 fetches are enough to locate any sequence in a ten-million-wide range. The final step steps back one sequence so the chosen diff is guaranteed to be at or before the target rather than just after it.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="bsq" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Bisect the stream: 24 fetches instead of 43 200</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">bounds</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">lo = known-old seq</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">hi = head from state.txt</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#bsq)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">probe midpoint</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">GET (lo+hi)/2 .state.txt</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">read its timestamp</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#bsq)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">halve</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">target earlier → hi = mid</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">else lo = mid</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#bsq)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">step back one</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">guarantee seq ≤ target</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">never overshoot</text>
+  <text x="440" y="158" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Cache the probed state.txt responses. A catch-up script that bisects twice in one run should not fetch the same midpoints twice.</text>
+</svg>
+<figcaption>Twenty-four HTTP requests to place a timestamp anywhere in a decade of minutely history. The linear alternative — walking back from the head — is 43 200 requests for a single month.</figcaption>
+</figure>
+
 The number you want is the sequence whose data is current *at or just before* your target instant, because applying that diff and everything after it brings the data up through your target without ever skipping a change. Picking the sequence *after* the target would leave a gap; that is why the search rounds down. This lookup is the seeding step referenced by the parent guide, [Replication Sequence Numbers & State Tracking](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/) — you run it once to find where a sync should begin, then hand the result to the diff-applying loop.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" role="img" aria-label="Binary search over replication state files to find the sequence for a target timestamp. A number line of sequences from a low bound to the current upstream sequence is labelled with increasing timestamps. A target timestamp T falls between two sequences. The search probes the midpoint state.txt, compares its timestamp to T, and discards the half that cannot contain the answer, converging on the greatest sequence whose timestamp is at or before T." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" role="img" aria-label="Binary search over replication state files to find the sequence for a target timestamp. A number line of sequences from a low bound to the current upstream sequence is labelled with increasing timestamps. A target timestamp T falls between two sequences. The search probes the midpoint state.txt, compares its timestamp to T, and discards the half that cannot contain the answer, converging on the greatest sequence whose timestamp is at or before T." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Binary search from timestamp to replication sequence</title>
   <desc>Sequences are sorted by timestamp; the search probes a midpoint state.txt, compares its timestamp to the target T, and halves the range until it lands on the greatest sequence at or before T.</desc>
   <defs>
     <marker id="frs-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="900" height="300" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="450" y="26" text-anchor="middle" font-size="14" fill="currentColor" font-weight="700">Sequences are sorted by time — find the last one at or before T</text>
   <!-- number line -->
   <line x1="70" y1="120" x2="830" y2="120" stroke="currentColor" stroke-width="1.5"/>
@@ -189,6 +221,38 @@ Confirm the resolved sequence is the right one before feeding it to a sync loop:
 | `ValueError` parsing timestamp | Backslash-escaped colons left in the field | Replace `\:` with `:` before `fromisoformat` |
 | Wrong sequence entirely | Regional target against the planet feed | Pass the extract's own `base_url` |
 | Hundreds of HTTP requests | `lo`/`hi` bounds wrong, search not converging | Read the root cursor for `hi`; keep `lo` ≥ 1 |
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="bisect-err-t bisect-err-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="bisect-err-t">Three failure modes of a timestamp-to-sequence search</title>
+  <desc id="bisect-err-d">Three panels. Off-by-one: landing on the sequence just after the target means the first applied diff contains edits the caller wanted excluded, fixed by always stepping back one. Timezone drift: state.txt timestamps are UTC with a trailing Z, and comparing them against a naive local datetime shifts the result by the UTC offset, fixed by parsing to an aware UTC datetime. Aged-out range: very old sequences may no longer be published, so the lower bound must be probed rather than assumed, and the search must fail loudly rather than clamp silently.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Three ways the search returns a plausible wrong sequence</text>
+  <rect x="26" y="52" width="258" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Off by one</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Landed on the sequence after T</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">First diff applied includes</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">edits the caller excluded</text>
+  <text x="40" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Fix: always step back one</text>
+  <text x="40" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Assert: state(seq).ts ≤ T</text>
+  <rect x="310" y="52" width="258" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Timezone drift</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">state.txt is UTC, suffixed Z</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Compared to a naive datetime</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Result shifts by the UTC offset</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Fix: parse to aware UTC</text>
+  <text x="324" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Assert: tzinfo is not None</text>
+  <rect x="594" y="52" width="258" height="157" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Aged-out lower bound</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Old sequences may be unpublished</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">A 404 is not "too early"</text>
+  <text x="608" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Clamping hides real data loss</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Fix: probe the bound, fail loudly</text>
+  <text x="608" y="188" font-size="10.5" fill="currentColor" opacity="0.92">Assert: lo actually resolves</text>
+  <text x="868" y="235" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.85">All three return a number. None of them raise. Assert the post-condition — the chosen sequence timestamp must be at or before the target — and all three become visible.</text>
+</svg>
+<figcaption>The timezone one is the quiet killer in a nightly job: it works all year and then produces an hour-shifted answer the week the clocks change.</figcaption>
+</figure>
 
 ## Specification reference
 

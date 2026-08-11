@@ -19,11 +19,15 @@
         <li>
           <a class="site-nav__link{% if page.url | startsWith(s.url) %} is-active{% endif %}" href="{{ site.url }}{{ s.url }}" {% if page.url | startsWith(s.url) %}aria-current="page"{% endif %}>
             {{ icon(s.icon, 'icon site-nav__icon') }}
-            <span>{{ s.title.split('&')[0] | trim }}</span>
+            <span>{{ s.navLabel or s.title }}</span>
           </a>
         </li>
         {%- endfor %}
       </ul>
     </nav>
+    <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme">
+      <span class="theme-toggle__moon">{{ icon('moon', 'icon') }}</span>
+      <span class="theme-toggle__sun">{{ icon('sun', 'icon') }}</span>
+    </button>
   </div>
 </header>

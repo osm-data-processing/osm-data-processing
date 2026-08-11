@@ -14,12 +14,13 @@ date: 2026-07-14
 
 A standard `.osm.pbf` extract answers one question — what does the map look like *now* — and it discards everything the map used to be. The moment your work needs the past tense, that file is the wrong input, and the failure is quiet rather than loud: a contributor-activity report built from a current-state planet silently under-counts every element that was later deleted or reverted, a temporal join against a 2021 land-use layer matches against 2026 geometry, and an audit of "who touched this building" returns exactly one row because only the newest version survives. The full-history format, distributed as `.osh.pbf` (the `h` marks *history*), fixes this by keeping every version of every node, way, and relation ever committed, along with the changeset, editor, and timestamp that produced each one. This guide sits inside the broader [OSM Replication & Diff Sync](https://www.osm-data-processing.org/osm-replication-diff-sync/) section, and where the replication pages care about moving the present forward one diff at a time, this one is about reading the whole timeline at rest.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" role="img" aria-label="Version timeline for a single OSM element in a full-history file. Five versions run left to right along a time axis: version one created in 2019, version two a geometry edit in 2020, version three a tag edit in 2021 all with visible set to true, version four a deletion in 2022 with visible set to false, and version five a recreation in 2023 with visible true again. A dashed vertical snapshot cut at time T in late 2021 falls between version three and version four, so the state materialized at T is version three, the newest visible version whose timestamp is at or before T." style="width:100%;max-width:1000px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" role="img" aria-label="Version timeline for a single OSM element in a full-history file. Five versions run left to right along a time axis: version one created in 2019, version two a geometry edit in 2020, version three a tag edit in 2021 all with visible set to true, version four a deletion in 2022 with visible set to false, and version five a recreation in 2023 with visible true again. A dashed vertical snapshot cut at time T in late 2021 falls between version three and version four, so the state materialized at T is version three, the newest visible version whose timestamp is at or before T." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Version timeline of one OSM element with a snapshot cut at time T</title>
   <desc>Five version cards sit above a horizontal time axis. Versions one through three are visible edits; version four is a deletion with visible=false; version five recreates the element. A dashed vertical line marks the snapshot instant T between version three and version four, and version three is highlighted as the version that is live at T.</desc>
   <defs>
     <marker id="fhpbf-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="340" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="500" y="24" text-anchor="middle" font-size="15" fill="currentColor" font-weight="700">One element, many versions — the snapshot at T is the newest visible version so far</text>
   <!-- v1 -->
   <rect x="40" y="46" width="150" height="60" rx="7" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
@@ -69,6 +70,37 @@ Full-history processing rests on the same primitives as any OSM workflow, seen t
 ## The .osh.pbf Format: Fields and Rules
 
 A full-history file is byte-compatible with an ordinary `.osm.pbf` at the framing level — the same protobuf blob-and-block structure — but it differs in two contractual ways. First, its header's `required_features` list contains the string `HistoricalInformation`, which is a hard signal to any reader that it must expect multiple objects with the same `(type, id)` and must not assume the last one wins. A consumer that ignores this flag and folds the file into a current-state map will overwrite earlier versions with later ones and quietly lose the history it was handed. Second, every object carries its full version metadata, and deletions are represented not by omission but by an explicit tombstone: a version whose `visible` attribute is `false`.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="osh-chain-t osh-chain-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osh-chain-t">One object identifier and the version chain a history file stores for it</title>
+  <desc id="osh-chain-d">A timeline for way 41 883 002. Version one is created in 2013 and visible. Version two in 2017 retags it and is visible. Version three in 2021 changes its geometry and is visible. Version four in 2024 deletes it, carrying visible false and no tags. A snapshot reader must keep only the newest version at or before its cut-off, and must drop the object entirely if that version is invisible.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="osh" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">way 41 883 002 as a history file stores it: four records, one identifier</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">v1 · 2013-04-11</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">created</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">visible=true · 8 tags</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#osh)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">v2 · 2017-09-02</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">retagged</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">visible=true · 11 tags</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#osh)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">v3 · 2021-01-30</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">geometry edited</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">visible=true · 11 tags</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#osh)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">v4 · 2024-06-18</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">deleted</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">visible=false · no tags</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Ask for the state on 2019-01-01 and the answer is v2. Ask for today and the answer is that the object does not exist — which only v4 can tell you.</text>
+</svg>
+<figcaption>A history file is not a bigger snapshot — it is a different shape. Every object appears once per edit, in ascending version order, and the deleted tombstone is a real record you must read rather than an absence you can infer.</figcaption>
+</figure>
 
 The per-version metadata block is the whole point of the format. Every node, way, and relation version exposes the following fields.
 
@@ -187,6 +219,37 @@ History processing has its own failure catalogue, distinct from current-state pa
 ## Performance & Scale Considerations
 
 A full-history planet is several times larger than a current-state planet — tens of billions of object versions — so the accumulate-everything shape shown above is a teaching form, not a production one. The governing discipline is *fold as you stream*: never keep two versions of an object once you know which one you need. For a snapshot at T, that means holding a single dictionary keyed on `(type, id)` and, on each incoming version, overwriting the stored record only when the new version's `timestamp` is ≤ T and its `version` exceeds the stored one. Because a history file emits versions of a given object in ascending `version` order, you can even drop a stored record the instant you see a version past T, which bounds resident memory to roughly the count of objects alive at T rather than the count of all versions ever.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 366" role="img" aria-labelledby="osh-size-t osh-size-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="osh-size-t">How much larger a full-history file is than the equivalent snapshot</title>
+  <desc id="osh-size-d">A bar chart comparing snapshot and full-history sizes. The planet snapshot is 80 gigabytes against a full-history planet of 780 gigabytes, roughly ten times. A country snapshot is 1.2 gigabytes against 14 gigabytes of history, about twelve times. A city snapshot is 42 megabytes against 610 megabytes, about fifteen times. Smaller and older-mapped areas have a higher ratio because edit count does not scale with object count.</desc>
+  <rect x="0" y="0" width="880" height="366" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">History is roughly an order of magnitude larger — but the ratio varies by area</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">file size, snapshot against full history</text>
+  <line x1="250" y1="68" x2="250" y2="312" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">planet snapshot</text>
+  <rect x="250" y="74" width="48" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="308" y="89" font-size="11" fill="currentColor" opacity="0.9">80 GB</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">planet full history</text>
+  <rect x="250" y="116" width="470" height="21" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="730" y="131" font-size="11" fill="currentColor" opacity="0.9">780 GB · 9.8×</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">country snapshot</text>
+  <rect x="250" y="158" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="173" font-size="11" fill="currentColor" opacity="0.9">1.2 GB</text>
+  <text x="240" y="215" text-anchor="end" font-size="11.5" fill="currentColor">country full history</text>
+  <rect x="250" y="200" width="8" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="268" y="215" font-size="11" fill="currentColor" opacity="0.9">14 GB · 11.7×</text>
+  <text x="240" y="257" text-anchor="end" font-size="11.5" fill="currentColor">city snapshot</text>
+  <rect x="250" y="242" width="6" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="266" y="257" font-size="11" fill="currentColor" opacity="0.9">42 MB</text>
+  <text x="240" y="299" text-anchor="end" font-size="11.5" fill="currentColor">city full history</text>
+  <rect x="250" y="284" width="6" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="266" y="299" font-size="11" fill="currentColor" opacity="0.9">610 MB · 14.5×</text>
+  <text x="868" y="348" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Plan disk from the history size and streaming from the version count — a city file with fifteen versions per object is CPU-bound long before it is disk-bound.</text>
+</svg>
+<figcaption>The multiplier is not constant: a densely edited European city carries far more versions per object than a recently mapped rural region, so sizing from the planet ratio under-provisions exactly the extracts you are most likely to process.</figcaption>
+</figure>
 
 Two levers dominate throughput. First, choose the CLI when the CLI suffices: `osmium time-filter` is a compiled single-pass streamer and will out-run any Python accumulation for a straight point-in-time cut, so reserve the pyosmium path for analyses that genuinely need per-version logic, such as provenance or version-to-version diffing. Second, restrict the object types you dispatch on — if you only need node history, omit the `way` and `relation` callbacks so libosmium can skip decoding those blocks. For very large jobs, the same block-independence that makes current-state PBF parallelizable applies here, but partition on object-id ranges rather than geography, because a way's history and its nodes' histories must land on the same worker to reconstruct geometry.
 

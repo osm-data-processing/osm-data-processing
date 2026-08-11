@@ -1,9 +1,11 @@
 /* =========================================================
    OSM Data Processing & QA Pipelines — site stylesheet
-   Light, cartographic-inspired palette.
+   Cartographic-inspired palette, light and dark.
    ========================================================= */
 
 :root {
+  color-scheme: light;
+
   /* Palette — softened cartographic tones */
   --c-bg: #f7f5ef;
   --c-bg-elev: #fffdf8;
@@ -28,6 +30,38 @@
   --c-code-inline-bg: rgba(31, 90, 125, 0.06);
   --c-code-border: #e0d8c1;
 
+  /* Text/icon colour that stays legible ON a filled accent surface. Flips with
+     the theme because the accents themselves lighten in dark mode. */
+  --c-on-accent: #ffffff;
+
+  /* Tinted surfaces derived from the accents. Named so the dark theme can
+     re-mix them rather than have each rule carry its own rgba() literal. */
+  --c-accent-wash: rgba(44, 107, 86, 0.10);
+  --c-accent-wash-strong: rgba(44, 107, 86, 0.14);
+  --c-accent-wash-soft: rgba(44, 107, 86, 0.04);
+  --c-header-bg: rgba(255, 253, 248, 0.88);
+  --c-codebar-bg: rgba(255, 253, 248, 0.55);
+  --c-thead-bg: linear-gradient(180deg, rgba(44, 107, 86, 0.08), rgba(31, 90, 125, 0.06));
+  --c-footer-bg: linear-gradient(180deg, rgba(31, 90, 125, 0.02), rgba(44, 107, 86, 0.06));
+  --c-underline: rgba(31, 90, 125, 0.35);
+
+  /* Diagram palette. Every inline SVG on the site paints through these six
+     tokens (plus the four added for newer diagrams), so a theme switch
+     recolours diagram interiors along with the page. The literals here are the
+     hexes the SVGs carry as their var() fallbacks — keep them in step. */
+  --osm-accent: #0369a1;
+  --osm-accent-bg: #e0f2fe;
+  --osm-ok: #15803d;
+  --osm-ok-bg: #dcfce7;
+  --osm-warn: #a16207;
+  --osm-warn-bg: #fef9c3;
+  --osm-bad: #b91c1c;
+  --osm-bad-bg: #fee2e2;
+  --osm-alt: #6d28d9;
+  --osm-alt-bg: #ede9fe;
+  --osm-canvas: #fffdf8;
+  --osm-grid: #d9d2c0;
+
   --r-sm: 6px;
   --r-md: 12px;
   --r-lg: 18px;
@@ -39,23 +73,81 @@
 
   --header-h: 64px;
 
-  --container: min(100% - 2rem, 1280px);
-  --container-wide: min(100% - 2rem, 1600px);
+  /* Reading measure. 950px is 120 characters of body text at the 17px the
+     font-size clamp settles on above ~640px viewport — measured, not guessed,
+     against the site's own prose. One value drives the whole site so the
+     header, the article and the footer share an edge, and everything inside
+     the column (paragraphs, diagrams, code, tables) spans it fully. */
+  --measure: 950px;
+  --container: min(100% - 2rem, var(--measure));
+  --container-wide: min(100% - 2rem, var(--measure));
 
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "Menlo", "Consolas", monospace;
 }
 
-@media (min-width: 1600px) {
-  :root {
-    --container: min(100% - 3rem, 1480px);
-    --container-wide: min(100% - 3rem, 1820px);
-  }
-}
-@media (min-width: 2000px) {
-  :root {
-    --container-wide: min(100% - 4rem, 1960px);
-  }
+/* -------------------------------------------------------------
+   Dark theme
+   Only the tokens change; every rule below reads them, so the whole
+   surface flips — page, header, cards, code, tables, and the interiors
+   of the inline-SVG diagrams.
+   ------------------------------------------------------------- */
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --c-bg: #101a1e;
+  --c-bg-elev: #17242a;
+  --c-surface: #1b2b32;
+  --c-surface-sub: #1f3037;
+  --c-ink: #eaf1f3;
+  --c-ink-soft: #c6d3d8;
+  --c-ink-muted: #9db0b8;
+  --c-rule: #2b3d45;
+  --c-rule-strong: #405860;
+
+  --c-accent: #5fc0a0;
+  --c-accent-2: #6cb8dd;
+  --c-accent-3: #e2a76f;
+  --c-accent-4: #a99bf7;
+  --c-accent-5: #f281ae;
+  --c-accent-6: #dcb63f;
+
+  --c-link: #82cbef;
+  --c-link-hover: #7fd6b6;
+  --c-code-bg: #121d22;
+  --c-code-inline-bg: rgba(130, 203, 239, 0.08);
+  --c-code-border: #2b3d45;
+
+  --c-on-accent: #0b1417;
+
+  --c-accent-wash: rgba(95, 192, 160, 0.14);
+  --c-accent-wash-strong: rgba(95, 192, 160, 0.22);
+  --c-accent-wash-soft: rgba(95, 192, 160, 0.06);
+  --c-header-bg: rgba(16, 26, 30, 0.90);
+  --c-codebar-bg: rgba(234, 241, 243, 0.05);
+  --c-thead-bg: linear-gradient(180deg, rgba(95, 192, 160, 0.14), rgba(108, 184, 221, 0.10));
+  --c-footer-bg: linear-gradient(180deg, rgba(108, 184, 221, 0.04), rgba(95, 192, 160, 0.08));
+  --c-underline: rgba(130, 203, 239, 0.40);
+
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --sh-md: 0 6px 18px rgba(0, 0, 0, 0.42);
+  --sh-lg: 0 20px 40px rgba(0, 0, 0, 0.50);
+
+  /* Diagram interiors: strokes and label colours lighten, fills go dark so the
+     currentColor labels drawn on them keep AA contrast. */
+  --osm-accent: #7cc4e8;
+  --osm-accent-bg: #12313f;
+  --osm-ok: #6fd08c;
+  --osm-ok-bg: #133326;
+  --osm-warn: #e6bb52;
+  --osm-warn-bg: #362a10;
+  --osm-bad: #f28e9c;
+  --osm-bad-bg: #3a1a1e;
+  --osm-alt: #b6a6f8;
+  --osm-alt-bg: #262046;
+  --osm-canvas: #17242a;
+  --osm-grid: #33474f;
 }
 
 /* -------------------------------------------------------------
@@ -110,7 +202,7 @@ a:focus-visible {
   left: -9999px;
   top: 0;
   background: var(--c-accent);
-  color: #fff;
+  color: var(--c-on-accent);
   padding: 0.6rem 1rem;
   z-index: 100;
   border-radius: 0 0 var(--r-md) 0;
@@ -135,7 +227,7 @@ a:focus-visible {
   position: fixed;
   top: 0; left: 0; right: 0;
   height: var(--header-h);
-  background: rgba(255, 253, 248, 0.88);
+  background: var(--c-header-bg);
   backdrop-filter: saturate(160%) blur(10px);
   -webkit-backdrop-filter: saturate(160%) blur(10px);
   border-bottom: 1px solid var(--c-rule);
@@ -166,6 +258,7 @@ a:focus-visible {
 .site-nav__list {
   list-style: none;
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.25rem;
   margin: 0; padding: 0;
 }
@@ -185,13 +278,13 @@ a:focus-visible {
 .site-nav__link:hover,
 .site-nav__link:focus-visible {
   color: var(--c-accent);
-  background: rgba(44, 107, 86, 0.10);
+  background: var(--c-accent-wash);
 }
 .site-nav__link.is-active {
   color: var(--c-accent);
-  background: rgba(44, 107, 86, 0.14);
+  background: var(--c-accent-wash-strong);
 }
-.site-nav__icon { width: 18px; height: 18px; }
+.site-nav__icon { width: 18px; height: 18px; flex-shrink: 0; }
 
 @media (max-width: 640px) {
   .site-header__name { display: none; }
@@ -213,7 +306,7 @@ a:focus-visible {
 
 .site-footer {
   margin-top: 4rem;
-  background: linear-gradient(180deg, rgba(31, 90, 125, 0.02), rgba(44, 107, 86, 0.06));
+  background: var(--c-footer-bg);
   border-top: 1px solid var(--c-rule);
   padding: 2.5rem 0 1rem;
 }
@@ -318,7 +411,7 @@ a:focus-visible {
   line-height: 1.1;
   letter-spacing: -0.01em;
   font-weight: 800;
-  max-width: 22ch;
+  max-width: 100%;
 }
 .hero__title-main {
   background: linear-gradient(90deg, var(--c-accent), var(--c-accent-2) 55%, var(--c-accent-4));
@@ -337,7 +430,7 @@ a:focus-visible {
 
 .hero__intro {
   margin: 1.5rem auto 0;
-  max-width: 72ch;
+  max-width: 100%;
   color: var(--c-ink-soft);
   text-align: left;
 }
@@ -426,7 +519,7 @@ a:focus-visible {
   width: 48px; height: 48px;
   border-radius: var(--r-md);
   background: linear-gradient(135deg, var(--c-accent), var(--c-accent-2));
-  color: #fff;
+  color: var(--c-on-accent);
   display: inline-flex;
   align-items: center; justify-content: center;
   margin-bottom: 0.9rem;
@@ -587,7 +680,7 @@ a:focus-visible {
 .prose a {
   color: var(--c-link);
   text-decoration: underline;
-  text-decoration-color: rgba(31, 90, 125, 0.35);
+  text-decoration-color: var(--c-underline);
   text-underline-offset: 3px;
   transition: color 0.18s ease, text-decoration-color 0.18s ease;
 }
@@ -628,28 +721,38 @@ a:focus-visible {
   background: var(--c-bg-elev);
   box-shadow: var(--sh-sm);
 }
-.prose table {
+.prose table,
+main table,
+article table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.94rem;
   min-width: 540px;
+  /* Tabular figures so a column of measurements lines up digit-for-digit. */
+  font-variant-numeric: tabular-nums;
 }
-.prose thead th {
-  background: linear-gradient(180deg, rgba(44, 107, 86, 0.08), rgba(31, 90, 125, 0.06));
+.prose thead th,
+main thead th,
+article thead th {
+  background: var(--c-thead-bg);
   text-align: left;
   font-weight: 600;
   color: var(--c-ink);
   padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--c-rule);
 }
-.prose tbody td {
+.prose tbody td,
+main tbody td,
+article tbody td {
   padding: 0.6rem 0.85rem;
   border-bottom: 1px solid var(--c-rule);
   color: var(--c-ink-soft);
   vertical-align: top;
 }
-.prose tbody tr:last-child td { border-bottom: 0; }
-.prose tbody tr:hover td { background: rgba(44, 107, 86, 0.04); }
+.prose tbody tr:last-child td,
+main tbody tr:last-child td,
+article tbody tr:last-child td { border-bottom: 0; }
+.prose tbody tr:hover td { background: var(--c-accent-wash-soft); }
 
 /* Task lists (checkboxes) */
 .prose ul.contains-task-list,
@@ -705,7 +808,7 @@ a:focus-visible {
   font-size: 0.78rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: rgba(255, 253, 248, 0.55);
+  background: var(--c-codebar-bg);
   border-bottom: 1px solid var(--c-code-border);
   color: var(--c-ink-muted);
 }
@@ -725,12 +828,12 @@ a:focus-visible {
 }
 .code-block__copy:hover {
   background: var(--c-accent);
-  color: #fff;
+  color: var(--c-on-accent);
   border-color: var(--c-accent);
 }
 .code-block__copy.is-copied {
   background: var(--c-accent);
-  color: #fff;
+  color: var(--c-on-accent);
   border-color: var(--c-accent);
 }
 .code-block__pre {
@@ -881,14 +984,14 @@ a:focus-visible {
   transform: translateY(-50%);
   width: 22px; height: 22px;
   border-radius: var(--r-pill);
-  background: rgba(44, 107, 86, 0.12);
+  background: var(--c-accent-wash);
   color: var(--c-accent);
   display: inline-flex;
   align-items: center; justify-content: center;
   font-weight: 700;
   transition: transform 0.18s ease, background 0.18s ease;
 }
-.prose details[open] > summary::after { content: "−"; background: var(--c-accent); color: #fff; }
+.prose details[open] > summary::after { content: "−"; background: var(--c-accent); color: var(--c-on-accent); }
 .prose details > *:not(summary) {
   padding: 0 1rem 1rem;
   color: var(--c-ink-soft);
@@ -903,8 +1006,8 @@ a:focus-visible {
   border: 1px solid var(--c-rule);
   border-radius: var(--r-md);
   padding: 1rem;
-  margin: 1.2rem auto;     /* auto-margin centres the card itself */
-  max-width: 1000px;       /* keep diagram cards readable on wide screens */
+  margin: 1.2rem 0;
+  max-width: 100%;         /* diagrams span the full reading column */
   overflow-x: auto;
   text-align: center;
   box-shadow: var(--sh-sm);
@@ -938,4 +1041,100 @@ a:focus-visible {
   .site-header, .site-footer, .related, .code-block__copy, .skip-link { display: none !important; }
   body { background: #fff; }
   .page__main { padding-top: 0; }
+}
+
+/* -------------------------------------------------------------
+   Theme toggle
+   ------------------------------------------------------------- */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  margin-left: 0.35rem;
+  padding: 0;
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-pill);
+  background: var(--c-bg-elev);
+  color: var(--c-ink-soft);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+  background: var(--c-accent-wash);
+}
+.theme-toggle .icon { width: 18px; height: 18px; }
+/* One button, two glyphs: show the scheme the click will switch TO. */
+.theme-toggle__moon { display: inline-flex; }
+.theme-toggle__sun { display: none; }
+[data-theme="dark"] .theme-toggle__moon { display: none; }
+[data-theme="dark"] .theme-toggle__sun { display: inline-flex; }
+
+/* -------------------------------------------------------------
+   Dark-theme spot fixes
+   Rules whose colour cannot come from a token alone.
+   ------------------------------------------------------------- */
+
+[data-theme="dark"] .hero {
+  background:
+    radial-gradient(60% 60% at 10% 10%, rgba(95, 192, 160, 0.14), transparent 70%),
+    radial-gradient(50% 50% at 90% 30%, rgba(108, 184, 221, 0.13), transparent 70%),
+    radial-gradient(40% 40% at 50% 90%, rgba(242, 129, 174, 0.08), transparent 70%);
+}
+[data-theme="dark"] .hero__logo-line .logo {
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+}
+[data-theme="dark"] .cta--teal   { --cta-color: #35836a; --cta-color-2: #276d95; }
+[data-theme="dark"] .cta--indigo { --cta-color: #5a4bd6; --cta-color-2: #276d95; }
+[data-theme="dark"] .cta--amber  { --cta-color: #b26a2c; --cta-color-2: #97690a; }
+[data-theme="dark"] .cta--rose   { --cta-color: #c22f68; --cta-color-2: #5a4bd6; }
+
+/* Prism token colours, re-mixed for the dark code surface. */
+[data-theme="dark"] .token.comment,
+[data-theme="dark"] .token.prolog,
+[data-theme="dark"] .token.cdata { color: #8fa79b; }
+[data-theme="dark"] .token.punctuation { color: #b6c4ca; }
+[data-theme="dark"] .token.property,
+[data-theme="dark"] .token.tag,
+[data-theme="dark"] .token.constant,
+[data-theme="dark"] .token.symbol,
+[data-theme="dark"] .token.deleted { color: #f0917a; }
+[data-theme="dark"] .token.boolean,
+[data-theme="dark"] .token.number { color: #e9a86a; }
+[data-theme="dark"] .token.selector,
+[data-theme="dark"] .token.attr-name,
+[data-theme="dark"] .token.string,
+[data-theme="dark"] .token.char,
+[data-theme="dark"] .token.builtin,
+[data-theme="dark"] .token.inserted { color: #79ceac; }
+[data-theme="dark"] .token.operator,
+[data-theme="dark"] .token.entity,
+[data-theme="dark"] .token.url,
+[data-theme="dark"] .language-css .token.string,
+[data-theme="dark"] .style .token.string,
+[data-theme="dark"] .token.variable { color: #79ceac; }
+[data-theme="dark"] .token.atrule,
+[data-theme="dark"] .token.attr-value,
+[data-theme="dark"] .token.function,
+[data-theme="dark"] .token.class-name { color: #86c8ea; }
+[data-theme="dark"] .token.keyword { color: #b3a4f8; }
+[data-theme="dark"] .token.regex,
+[data-theme="dark"] .token.important { color: #f386ac; }
+
+@media print {
+  .theme-toggle { display: none !important; }
+}
+
+.hero__stat {
+  margin-top: 0.4rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--c-rule);
+  color: var(--c-ink-muted);
+  font-size: 0.95rem;
 }

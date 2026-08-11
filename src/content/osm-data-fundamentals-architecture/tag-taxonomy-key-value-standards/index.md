@@ -11,7 +11,7 @@ date: 2026-06-26
 ---
 # Tag Taxonomy & Key-Value Standards
 
-<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow diagram of the tag-normalization stage: a raw TagList streamed off an OSM primitive (with case-variant, aliased, and unitful example tags) flows into key normalization (NFC, lowercase, shape check, namespace split on colon), then value canonicalization (alias-to-canonical enumeration and unit/type coercion), then a validation gate that routes valid tags to a typed feature sink carrying canonical keys and coerced values, and defective tags to a quarantine dead-letter sink that records the reason" style="width:100%;max-width:760px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data-flow diagram of the tag-normalization stage: a raw TagList streamed off an OSM primitive (with case-variant, aliased, and unitful example tags) flows into key normalization (NFC, lowercase, shape check, namespace split on colon), then value canonicalization (alias-to-canonical enumeration and unit/type coercion), then a validation gate that routes valid tags to a typed feature sink carrying canonical keys and coerced values, and defective tags to a quarantine dead-letter sink that records the reason" style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Tag-Normalization Data Flow: Raw Tags to Typed Sink or Quarantine</title>
   <desc>A TagList read from a streamed node, way, or relation moves left to right through two transform stages and a validation gate. Key normalization applies NFC, lowercasing, a segment shape check, and a namespace split on the colon. Value canonicalization resolves aliases to a canonical enumeration member and coerces measurements into a number plus unit. The validation gate then branches: tags that pass go to a typed feature sink with canonical keys and coerced values, while malformed keys, empty values, and unresolvable values go to a quarantine dead-letter sink that records the rejection reason. Peak memory stays flat because each tag is validated and discarded inside the streaming callback.</desc>
   <defs>
@@ -19,6 +19,7 @@ date: 2026-06-26
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="760" height="270" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- Stage 1: Raw TagList -->
   <rect x="16" y="55" width="120" height="130" rx="4" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-width="1.5"/>
   <text x="76" y="76" text-anchor="middle" font-size="12" fill="currentColor" font-weight="bold">Raw TagList</text>
@@ -75,6 +76,35 @@ Tag normalization runs after the structural layer, so a few foundations must be 
 ## Specification & Field Reference
 
 OSM tags are governed less by a formal schema than by a small set of hard API limits plus a large body of community convention. Treat the limits as invariants your validator can assume, and the conventions as rules your validator must *enforce* because nothing upstream does.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 230" role="img" aria-labelledby="tag-key-t tag-key-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="tag-key-t">The four structural parts of a namespaced OSM tag key</title>
+  <desc id="tag-key-d">An annotated breakdown of the key maxspeed:hgv:conditional. The base key maxspeed carries the meaning. The transport-mode qualifier hgv narrows who it applies to. The conditional suffix marks the value as a semicolon-separated list of value-at-condition pairs. A note explains that colons are structural, that suffix order is conventional rather than enforced, and that a naive split on colon will mis-parse keys such as addr:street:name.</desc>
+  <rect x="0" y="0" width="880" height="230" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Reading a namespaced key: maxspeed:hgv:conditional</text>
+  <rect x="26" y="52" width="258" height="136" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="155" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">maxspeed</text>
+  <text x="40" y="104" font-size="10.5" fill="currentColor" opacity="0.92">The base key — carries the meaning</text>
+  <text x="40" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Alone: applies to every vehicle</text>
+  <text x="40" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Value: number + optional unit</text>
+  <text x="40" y="167" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">50` · `30 mph` · `RO:urban</text>
+  <rect x="310" y="52" width="258" height="136" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="439" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">:hgv</text>
+  <text x="324" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Transport-mode qualifier</text>
+  <text x="324" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Narrows who the value applies to</text>
+  <text x="324" y="146" font-size="10.5" fill="currentColor" opacity="0.92">Common: hgv, bus, bicycle, foot</text>
+  <text x="324" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Absent means "all modes"</text>
+  <rect x="594" y="52" width="258" height="136" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="723" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">:conditional</text>
+  <text x="608" y="104" font-size="10.5" fill="currentColor" opacity="0.92">Changes how the value parses</text>
+  <text x="608" y="125" font-size="10.5" fill="currentColor" opacity="0.92">Value becomes value @ condition</text>
+  <text x="608" y="146" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">60 @ (22:00-06:00)</text>
+  <text x="608" y="167" font-size="10.5" fill="currentColor" opacity="0.92">Semicolon-separated list</text>
+  <text x="868" y="214" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Colons are structural, but suffix order is only conventional — and addr:street:name has no qualifier at all, so a blind split on ":" mis-reads it.</text>
+</svg>
+<figcaption>Nothing in the OSM data model enforces this grammar — it is convention held up by editor presets and validators. A parser that assumes the grammar holds must also handle the keys where it does not.</figcaption>
+</figure>
 
 | Field / rule | Constraint | Notes for ETL |
 |---|---|---|
@@ -234,6 +264,28 @@ Alias and enumeration lookups should be flat hash maps, never linear scans, so c
 - **Over-eager rejection.** A value that is unknown to your global enum may be a perfectly valid regional convention. Route unknowns to a localized rule set before discarding them, or you erase legitimate local mapping.
 - **Boolean ambiguity.** `oneway` accepts `yes`/`no`/`true`/`1`/`-1`/`reversible`; coercing it as a plain bool collapses `-1` (reverse direction) into `false`. Enumerate the full value domain per key rather than assuming Python truthiness.
 - **Tag index overflow.** Tags arrive as indices into a per-block string table; an off-by-one in the `0`-terminated key/value index stream misattributes a tag to the wrong object. This is a decode bug upstream of normalization but surfaces as nonsensical tags here.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 240" role="img" aria-labelledby="tag-value-spread-t tag-value-spread-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="tag-value-spread-t">How tag values distribute for a single key, and where a whitelist stops working</title>
+  <desc id="tag-value-spread-d">A bar chart of value frequency for the highway surface key across a planet extract. The top five values cover 91.4 percent of tagged ways. The next twenty cover 6.8 percent. Everything below that is 1.8 percent, spread across roughly 4300 distinct spellings including typos, locale variants and free text.</desc>
+  <rect x="0" y="0" width="880" height="240" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Tag values are Zipfian — five spellings cover nine ways in ten</text>
+  <text x="34" y="54" font-size="11.5" font-weight="600" fill="currentColor">share of tagged ways carrying each band of surface= values</text>
+  <line x1="250" y1="68" x2="250" y2="186" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="240" y="89" text-anchor="end" font-size="11.5" fill="currentColor">top 5 values</text>
+  <rect x="250" y="74" width="352" height="21" rx="3" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="612" y="89" font-size="11" fill="currentColor" opacity="0.9">91.4% — asphalt, paved, unpaved, gravel, ground</text>
+  <text x="240" y="131" text-anchor="end" font-size="11.5" fill="currentColor">next 20 values</text>
+  <rect x="250" y="116" width="26" height="21" rx="3" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.3"/>
+  <text x="286" y="131" font-size="11" fill="currentColor" opacity="0.9">6.8% — concrete, dirt, sett, compacted …</text>
+  <text x="240" y="173" text-anchor="end" font-size="11.5" fill="currentColor">the other ~4 300</text>
+  <rect x="250" y="158" width="7" height="21" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="267" y="173" font-size="11" fill="currentColor" opacity="0.9">1.8% — typos, locale variants, free text</text>
+  <text x="868" y="222" text-anchor="end" font-size="10.5" fill="currentColor" opacity="0.85">Design the mapping table for the first two bands and the review queue for the third. Trying to enumerate the third is how tag tables reach ten thousand rows and still miss.</text>
+</svg>
+<figcaption>The distribution is why a whitelist works and an enumeration does not. Five values buy you ninety percent; the remaining ten percent is a long tail no fixed list will ever close.</figcaption>
+</figure>
 
 ## Integration Points
 

@@ -29,14 +29,40 @@ Confirm each item; the most common surprise is a file that parses cleanly but re
 
 Every version of every OSM element carries a fixed metadata block independent of its tags and geometry: a `version` counter, the `changeset` that committed it, the editor's numeric `uid` and display `user`, and a UTC `timestamp`. In a current-state extract you see this block once per object; in a full-history file you see it once per *version*, which is exactly what makes the file usable for auditing — you can reconstruct who changed what, when, and under which changeset across an object's whole life. This is the same per-version stream used to [reconstruct features at a past date](https://www.osm-data-processing.org/osm-replication-diff-sync/full-history-osh-pbf-processing/reconstructing-osm-features-at-a-past-date/), read for provenance rather than for state. Extraction is therefore a flat projection: for each version, emit one row of `(type, id, version, changeset, uid, user, timestamp)`, and leave the tags behind.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 251" role="img" aria-labelledby="cs-fields-t cs-fields-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="cs-fields-t">What a history file tells you about a changeset and what it does not</title>
+  <desc id="cs-fields-d">Two panels. Present in the history file, per object version: the changeset identifier, the user identifier and display name, the version number and the edit timestamp. Absent, and only available from the changeset dump or API: the changeset comment, the created_by editor string, the bounding box, the open and close times, and any discussion. A note explains that the history file gives you who and when at object granularity, but why and how requires the separate changeset stream.</desc>
+  <rect x="0" y="0" width="880" height="251" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">The history file answers who and when — not why</text>
+  <rect x="26" y="52" width="401" height="157" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="226" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">In the .osh.pbf, per version</text>
+  <text x="40" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">changeset` — the id, always present</text>
+  <text x="40" y="125" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">uid` and `user` — who made the edit</text>
+  <text x="40" y="146" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">version` — monotonic per object</text>
+  <text x="40" y="167" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">timestamp` — when it was applied</text>
+  <text x="40" y="188" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">visible` — created/edited or deleted</text>
+  <rect x="453" y="52" width="401" height="157" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="653" y="78" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">Only in the changeset dump or API</text>
+  <text x="467" y="104" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">comment` — what the mapper said</text>
+  <text x="467" y="125" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">created_by` — JOSM, iD, a bot</text>
+  <text x="467" y="146" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">bbox` — the extent it touched</text>
+  <text x="467" y="167" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.92">created_at` / `closed_at</text>
+  <text x="467" y="188" font-size="10.5" fill="currentColor" opacity="0.92">discussion and review flags</text>
+  <text x="440" y="235" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Join the two on the changeset id. Do it once into a lookup table, not per object — a busy changeset touches tens of thousands of objects.</text>
+</svg>
+<figcaption>This split catches people out when building edit analytics. Counting edits per user needs only the history file; explaining a suspicious burst needs the changeset dump joined on the identifier.</figcaption>
+</figure>
+
 The one caveat that governs whether this works at all is metadata availability. The OSM PBF and XML schemas treat object metadata as optional, so a producer can strip it to shrink a file — and when it is stripped, pyosmium returns `version = 0`, `changeset = 0`, `uid = 0`, an empty `user`, and an invalid timestamp rather than raising. History files distributed as `.osh.pbf` always retain metadata, because the metadata *is* the history; the risk arises with self-made extracts. Whenever you cut a region from a history planet you must keep history explicitly, and if a downstream tool re-encoded the file with metadata disabled, provenance is simply gone and no code can recover it. The reader below detects that condition instead of silently emitting a table of zeros.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" role="img" aria-label="Provenance extraction flow. A stack of element versions on the left each carries a metadata block. A projection step in the middle pulls the changeset, uid, user, and timestamp fields from every version. On the right the rows aggregate into a contributor table grouped by uid with edit counts." style="width:100%;max-width:900px;display:block;margin:1.5rem auto;font-family:inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="14 -4 862 238" role="img" aria-label="Provenance extraction flow. A stack of element versions on the left each carries a metadata block. A projection step in the middle pulls the changeset, uid, user, and timestamp fields from every version. On the right the rows aggregate into a contributor table grouped by uid with edit counts." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit">
   <title>Projecting per-version metadata into a contributor audit table</title>
   <desc>Element versions on the left feed a field-projection step that extracts changeset, uid, user, and timestamp, which then group by uid into a contributor table on the right.</desc>
   <defs>
     <marker id="ecm-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>
   </defs>
+  <rect x="14" y="-4" width="862" height="238" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <text x="450" y="26" text-anchor="middle" font-size="14.5" fill="currentColor" font-weight="700">Every version's metadata block becomes one provenance row</text>
   <!-- version stack -->
   <rect x="30" y="70" width="150" height="44" rx="6" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.4"/>
@@ -176,6 +202,37 @@ if __name__ == "__main__":
 4. **Keep `user` as best-effort.** The display name can be blank when an account was deleted or a version redacted, while `uid` remains stable. Rows retain both, and the summary groups on `uid` so redacted names never split one contributor into several buckets.
 5. **Aggregate flexibly.** `contributor_summary` uses pandas for a fast `groupby` when it is installed and otherwise falls back to `collections.Counter`, so the extraction has no hard dependency on the data-frame stack.
 6. **Timestamps serialize as ISO-8601.** `obj.timestamp.isoformat()` produces a sortable, timezone-aware string that loads cleanly into a database or a data frame later.
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="cs-agg-t cs-agg-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="cs-agg-t">Aggregating a history stream into per-changeset rows in one pass</title>
+  <desc id="cs-agg-d">A left-to-right chain. Every object version streams in. A grouping stage keys on the changeset identifier, accumulating a first-seen and last-seen timestamp, per-type counts and a running bounding box. A threshold stage flushes any changeset not seen for a configurable number of versions, bounding memory. The emitted rows are one per changeset with counts and extent.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="csa" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Grouping by changeset without holding the whole file</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">version stream</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">ordered by object</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">changesets interleave</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#csa)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">accumulate</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">per changeset id</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">counts · bbox · times</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#csa)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">flush stale groups</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">unseen for N records</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">bounds the accumulator</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#csa)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">per-changeset rows</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">one row each</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">counts, extent, window</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Objects from one changeset are scattered through the file, so "unseen for N records" is a heuristic — size N from the largest changeset you care to keep intact.</text>
+</svg>
+<figcaption>The flush threshold is what keeps this a streaming job. Without it the accumulator holds every changeset in the file, which on a planet history is tens of millions of open groups.</figcaption>
+</figure>
 
 ## Verification
 

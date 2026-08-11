@@ -23,11 +23,33 @@ OpenStreetMap persists every node, way, and relation in unprojected WGS 84 geogr
 
 The single rule that prevents most corruption is axis order. PROJ follows the EPSG registry, which defines EPSG:4326 as latitude-first, while OSM tooling, GeoJSON, and Shapely all expect `(longitude, latitude)`. Passing `always_xy=True` forces pyproj to treat the X argument as longitude and Y as latitude regardless of the CRS pair or PROJ version, removing a brittle implicit dependency. For local accuracy, pick the UTM zone covering the extract centroid, where the zone number follows:
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 860 244" role="img" aria-labelledby="pyproj-cost-t pyproj-cost-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="pyproj-cost-t">Cost of transformer construction against transformer reuse</title>
+  <desc id="pyproj-cost-d">A horizontal bar chart of wall-clock seconds to reproject one million nodes. Constructing a Transformer inside the loop takes 612 seconds. Constructing it once and calling it per point takes 44 seconds. Constructing it once and passing the whole coordinate array in a single call takes 1.1 second.</desc>
+  <rect x="0" y="0" width="860" height="244" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Where the time goes: constructing the transformer, not using it</text>
+  <text x="34" y="58" font-size="11.5" font-weight="600" fill="currentColor">1 M nodes reprojected, wall-clock seconds</text>
+  <line x1="290" y1="70" x2="290" y2="212" stroke="var(--osm-grid,#d9d2c0)" stroke-width="1"/>
+  <text x="280" y="96" text-anchor="end" font-size="11.5" fill="currentColor">Transformer per point</text>
+  <rect x="290" y="82" width="500" height="22" rx="3" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.3"/>
+  <text x="798" y="98" font-size="11" font-weight="600" fill="currentColor">612 s</text>
+  <text x="280" y="140" text-anchor="end" font-size="11.5" fill="currentColor">Built once, called per point</text>
+  <rect x="290" y="126" width="36" height="22" rx="3" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.3"/>
+  <text x="334" y="142" font-size="11" fill="currentColor">44 s</text>
+  <text x="280" y="184" text-anchor="end" font-size="11.5" fill="currentColor">Built once, whole array at once</text>
+  <rect x="290" y="170" width="8" height="22" rx="2" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.3"/>
+  <text x="306" y="186" font-size="11" font-weight="600" fill="currentColor">1.1 s</text>
+  <text x="430" y="226" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">Construction parses the CRS definition and builds a pipeline; the projection maths itself is a handful of floating-point operations.</text>
+</svg>
+<figcaption>Two independent wins stack here: hoisting construction out of the loop, then handing pyproj whole arrays so the per-call overhead is amortised across a million points instead of paid a million times.</figcaption>
+</figure>
+
 $$ \text{zone} = \left\lfloor \frac{\lambda + 180}{6} \right\rfloor + 1 $$
 
 with $\lambda$ the centroid longitude in decimal degrees.
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" style="width:100%;max-width:1000px;display:block;margin:1.5rem auto" role="img" aria-label="Axis-order pitfall: the same OSM node (lat 52.52, lon 13.40) sent through pyproj two ways. With always_xy=True the X argument is treated as longitude, producing correct UTM Zone 33N coordinates near Berlin. Without it PROJ reads X as latitude, swapping the axes and producing an out-of-bounds result.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" style="width:100%;max-width:100%;display:block;margin:1.5rem auto" role="img" aria-label="Axis-order pitfall: the same OSM node (lat 52.52, lon 13.40) sent through pyproj two ways. With always_xy=True the X argument is treated as longitude, producing correct UTM Zone 33N coordinates near Berlin. Without it PROJ reads X as latitude, swapping the axes and producing an out-of-bounds result.">
   <title>Axis-order pitfall: always_xy=True versus the default</title>
   <desc>Two parallel pipelines start from one OSM node with latitude 52.52 and longitude 13.40. The top lane passes always_xy=True, so the pyproj Transformer maps X to longitude and Y to latitude, yielding valid UTM Zone 33N coordinates x≈392,440 and y≈5,820,080 over Berlin. The bottom lane omits always_xy, so PROJ follows EPSG authority order and reads the first argument as latitude; the axes are swapped and the point projects outside the zone extent, landing in the wrong place.</desc>
   <defs>
@@ -35,6 +57,7 @@ with $\lambda$ the centroid longitude in decimal degrees.
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="1000" height="320" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <!-- Shared source node -->
   <rect x="16" y="116" width="172" height="88" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
   <text x="102" y="146" text-anchor="middle" font-size="13" font-family="inherit" fill="currentColor" font-weight="600">OSM node</text>
@@ -147,6 +170,36 @@ if __name__ == "__main__":
 6. **Finite masking** — `np.isfinite(...).all(axis=1)` drops any row that transformed to `inf`/`nan` (input outside the target CRS extent), and the count is logged rather than silently swallowed.
 7. **Bounded streaming** — `chunk_size` caps live memory; at 1,000,000 points a chunk holds roughly 16 MB of `float64`, leaving headroom on a standard worker even when several stages run concurrently. Pair this with [memory-efficient chunk processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) to keep the whole ingestion deterministic on multi-gigabyte extracts.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 860 232" role="img" aria-labelledby="ppl-anatomy-t ppl-anatomy-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="ppl-anatomy-t">The three stages a pyproj Transformer resolves at construction time</title>
+  <desc id="ppl-anatomy-d">A left-to-right chain: source CRS EPSG:4326, then a datum shift from WGS 84 to the target datum, then the projection itself such as transverse Mercator, Lambert azimuthal equal-area or Mercator, ending in projected x and y in metres. A panel below notes that all three stages are resolved once at construction and cached, making the object expensive to build, cheap to call, and something to build per worker after a fork.</desc>
+  <rect x="0" y="0" width="860" height="232" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="ppl" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="430" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">What <tspan font-family="monospace">Transformer.from_crs</tspan> actually assembles</text>
+  <rect x="24" y="52" width="150" height="62" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="99" y="76" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">source CRS</text>
+  <text x="99" y="96" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">EPSG:4326</text>
+  <line x1="174" y1="83" x2="212" y2="83" stroke="currentColor" stroke-width="1.5" marker-end="url(#ppl)"/>
+  <rect x="214" y="52" width="176" height="62" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="302" y="76" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">datum shift</text>
+  <text x="302" y="96" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">WGS 84 → target datum</text>
+  <line x1="390" y1="83" x2="428" y2="83" stroke="currentColor" stroke-width="1.5" marker-end="url(#ppl)"/>
+  <rect x="430" y="52" width="176" height="62" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="518" y="76" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">projection</text>
+  <text x="518" y="96" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">tmerc · laea · merc</text>
+  <line x1="606" y1="83" x2="644" y2="83" stroke="currentColor" stroke-width="1.5" marker-end="url(#ppl)"/>
+  <rect x="646" y="52" width="188" height="62" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="740" y="76" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">projected (x, y)</text>
+  <text x="740" y="96" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.85">metres</text>
+  <rect x="24" y="140" width="810" height="72" rx="8" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.4"/>
+  <text x="429" y="164" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">All three stages are resolved once, at construction — and cached on the object</text>
+  <text x="429" y="186" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.9">A Transformer is therefore expensive to build, cheap to call, and safe to reuse for every node in the extract.</text>
+  <text x="429" y="204" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.9">It is not thread-safe to share across processes, so build one per worker after the fork, not before.</text>
+</svg>
+<figcaption>Reuse is safe because the object is immutable once built — but build it <em>inside</em> each worker process. A Transformer created before a fork carries a PROJ context that does not survive the copy cleanly.</figcaption>
+</figure>
+
 ## Verification
 
 Confirm the reprojection is correct before wiring it into the next stage:
@@ -172,6 +225,26 @@ Confirm the reprojection is correct before wiring it into the next stage:
 > OpenStreetMap stores all geometry in WGS 84 (EPSG:4326); the datum is fixed by convention and is not encoded in the data. See the OSM Wiki on [Node](https://wiki.openstreetmap.org/wiki/Node) coordinates and the [EPSG:4326](https://epsg.io/4326) and [EPSG:32633](https://epsg.io/32633) definitions for axis order and valid extents. In PBF, raw integers are reconstructed via `granularity` and `lat_offset`/`lon_offset` before any reprojection — the [PBF File Structure Deep Dive](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/) covers that decode step.
 
 Projected node arrays from this procedure feed directly into the metric stages that follow — most often [spatial indexing for OSM extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/), where R-tree, H3, or Quadkey structures accelerate proximity queries and boundary clipping.
+
+## Frequently Asked Questions
+
+<details>
+<summary>Is a Transformer safe to share between threads?</summary>
+
+Reading from one concurrently is safe in current pyproj releases, because the underlying PROJ context is thread-local and the transformation itself does not mutate the object. Sharing across a `fork`, however, is not: the child inherits a context that was created in the parent, and behaviour ranges from a silent slow path to a crash. Build the transformer inside each worker after the fork, which is cheap enough when it happens once per worker and catastrophic when it happens once per point.
+</details>
+
+<details>
+<summary>Why does pyproj sometimes download grid files?</summary>
+
+Because an accurate datum transformation between some pairs of systems needs a correction grid that is too large to ship with the package. When the grid is missing, PROJ falls back to a less accurate transformation rather than failing, so results differ by metres between a machine with the grid and one without. If reproducibility across environments matters, either pre-fetch the grids with `pyproj sync` and bake them into the image, or pin the transformation explicitly so no fallback is possible.
+</details>
+
+<details>
+<summary>Should I reproject before or after filtering?</summary>
+
+After. Filtering is usually cheaper in the source system — a bounding-box test in degrees is a comparison, and the same test after projection needs the projection first — and reprojecting fewer points is strictly less work. The exception is a filter expressed in metres, such as "within 500 m of a line", which cannot be evaluated correctly in degrees at all.
+</details>
 
 ## Related
 

@@ -30,9 +30,42 @@ Confirm each item before running the code below; a skipped step is the usual rea
 
 OpenStreetMap stores attributes as a free-form key-value map on every element, and nothing in the format enforces a casing convention — so the same real-world value arrives as `Asphalt`, `ASPHALT`, and `asphalt` from three different editors. Casing must therefore be resolved per key, not globally, because the correct strategy depends on what the key *means*: enumerated values defined in [Tag Taxonomy & Key-Value Standards](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/) (`highway`, `surface`, `amenity`) are conventionally lowercase, whereas `ref` route numbers (`A1`, `M25`), `website` URLs, and `name:*` labels are case-sensitive and must be preserved verbatim. A blanket `.str.lower()` corrupts exactly the fields downstream joins and routing engines depend on.
 
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 278" role="img" aria-labelledby="case-ops-t case-ops-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="case-ops-t">Four case operations and what each one does to non-ASCII text</title>
+  <desc id="case-ops-d">A grid of four case operations against their effect on a German street name and on a Turkish place name. lower() lowercases the German name correctly but produces a dotless i for the Turkish one under a Turkish locale. upper() expands the German sharp s into a double S, changing the string length. casefold() handles both correctly for comparison purposes but is not a display form. And title() capitalises after every non-letter, breaking names containing apostrophes or hyphens.</desc>
+  <rect x="0" y="0" width="880" height="278" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Case operations are for comparison keys, not for display values</text>
+  <text x="371" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">German: "Straße"</text>
+  <text x="693" y="70" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Turkish: "İzmir"</text>
+  <text x="198" y="104" text-anchor="end" font-size="11.5" fill="currentColor">.lower()</text>
+  <rect x="213" y="84" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">straße — correct</text>
+  <rect x="535" y="84" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="693" y="104" text-anchor="middle" font-size="10.5" fill="currentColor">i̇zmir / izmir by locale</text>
+  <text x="198" y="144" text-anchor="end" font-size="11.5" fill="currentColor">.upper()</text>
+  <rect x="213" y="124" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="371" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">STRASSE — length changes</text>
+  <rect x="535" y="124" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="144" text-anchor="middle" font-size="10.5" fill="currentColor">İZMIR — correct</text>
+  <text x="198" y="184" text-anchor="end" font-size="11.5" fill="currentColor">.casefold()</text>
+  <rect x="213" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="371" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">strasse — comparison-safe</text>
+  <rect x="535" y="164" width="316" height="32" rx="5" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.2"/>
+  <text x="693" y="184" text-anchor="middle" font-size="10.5" fill="currentColor">i̇zmir — comparison-safe</text>
+  <text x="198" y="224" text-anchor="end" font-size="11.5" fill="currentColor">.title()</text>
+  <rect x="213" y="204" width="316" height="32" rx="5" fill="var(--osm-bad-bg,#fee2e2)" stroke="var(--osm-bad,#b91c1c)" stroke-width="1.2"/>
+  <text x="371" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">O'Brien → O'brien</text>
+  <rect x="535" y="204" width="316" height="32" rx="5" fill="var(--osm-warn-bg,#fef9c3)" stroke="var(--osm-warn,#a16207)" stroke-width="1.2"/>
+  <text x="693" y="224" text-anchor="middle" font-size="10.5" fill="currentColor">İzmir — correct here</text>
+  <text x="868" y="260" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Store the raw value, derive a casefolded key beside it, and join on the key. Displaying the folded form is how a dataset loses every proper noun it had.</text>
+</svg>
+<figcaption>Only casefold is safe for comparison, and none of the four is safe for display. Normalise a comparison key and leave the display value alone.</figcaption>
+</figure>
+
 This page is the dataframe-side counterpart to the streaming rewrite in [Value Standardization & Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/): it operates after parsing has already widened tags into columns, and it produces case-resolved strings that the registry lookups in [Batch Attribute Mapping Strategies](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/batch-attribute-mapping-strategies/) can then match exactly. Two requirements govern the implementation. First, the transform must be **vectorized** — pandas `.str` accessors push iteration below the Python interpreter, so a row-wise `.apply()` is the difference between minutes and hours on a continental extract. Second, it must be **declarative**: the key→strategy mapping lives in YAML, version-controlled and editable without touching code, so adding a new lowercase key never risks an accidental mutation of a case-sensitive one.
 
-<svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Per-column case-normalization data flow. A wide OSM tag DataFrame, one column per key, feeds a per-column router driven by the tag_normalization_rules.yaml file. The router dispatches each column to one of four strategy lanes: lowercase for highway, surface and amenity; titlecase for operator; regex_clean (strip, collapse whitespace, lower) for description; and a preserve lane for ref, name:en and website that bypasses all mutation. The lowercase and regex_clean lanes are downcast to category dtype, and every lane converges to dictionary-encoded Parquet chunks." style="width:100%;max-width:980px;display:block;margin:1.5rem auto;font-family:inherit;">
+<svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Per-column case-normalization data flow. A wide OSM tag DataFrame, one column per key, feeds a per-column router driven by the tag_normalization_rules.yaml file. The router dispatches each column to one of four strategy lanes: lowercase for highway, surface and amenity; titlecase for operator; regex_clean (strip, collapse whitespace, lower) for description; and a preserve lane for ref, name:en and website that bypasses all mutation. The lowercase and regex_clean lanes are downcast to category dtype, and every lane converges to dictionary-encoded Parquet chunks." style="width:100%;max-width:100%;display:block;margin:1.5rem auto;font-family:inherit;">
   <title>Vectorized per-column tag case-normalization data flow</title>
   <desc>A wide tag DataFrame feeds a YAML-driven router that splits columns into lowercase, titlecase, regex_clean and a mutation-free preserve lane, then converges to category-dtype, dictionary-encoded Parquet chunks.</desc>
   <defs>
@@ -40,6 +73,7 @@ This page is the dataframe-side counterpart to the streaming rewrite in [Value S
       <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
     </marker>
   </defs>
+  <rect x="0" y="0" width="980" height="360" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
   <g fill="currentColor" text-anchor="middle">
     <!-- YAML rule set -->
     <rect x="196" y="20" width="178" height="48" rx="6" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-width="1.5"/>
@@ -253,6 +287,37 @@ rules:
 ## Verification
 
 Confirm the normalization is correct before handing the frame downstream:
+
+<figure class="diagram-wrap">
+<svg viewBox="0 0 880 174" role="img" aria-labelledby="case-verify-t case-verify-d" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:100%;display:block;margin:0 auto;font-family:inherit;">
+  <title id="case-verify-t">Assertions that a case-normalisation pass is safe to re-run</title>
+  <desc id="case-verify-d">A left-to-right chain of four assertions. The folded key column must be idempotent under a second fold. The count of distinct raw values must be greater than or equal to the count of distinct folded values, never less, which would mean the fold introduced variation. Every raw value must still be present unchanged in its own column. And a reverse lookup from a folded key to its raw values must return every original spelling, so nothing was merged away silently.</desc>
+  <rect x="0" y="0" width="880" height="174" rx="10" fill="var(--osm-canvas,#fffdf8)"/>
+  <defs><marker id="cvf" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+  <text x="440" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Four assertions that keep the fold a key rather than a rewrite</text>
+  <rect x="26" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="116" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">fold is idempotent</text>
+  <text x="116" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">fold(fold(x)) == fold(x)</text>
+  <text x="116" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">or it is not a key</text>
+  <line x1="207" y1="96" x2="237" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#cvf)"/>
+  <rect x="241" y="64" width="181" height="64" rx="8" fill="var(--osm-ok-bg,#dcfce7)" stroke="var(--osm-ok,#15803d)" stroke-width="1.5"/>
+  <text x="331" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">distinct(raw) ≥ distinct(key)</text>
+  <text x="331" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">never fewer</text>
+  <text x="331" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">folding cannot add variety</text>
+  <line x1="422" y1="96" x2="452" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#cvf)"/>
+  <rect x="456" y="64" width="181" height="64" rx="8" fill="var(--osm-accent-bg,#e0f2fe)" stroke="var(--osm-accent,#0369a1)" stroke-width="1.5"/>
+  <text x="546" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">raw column unchanged</text>
+  <text x="546" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">byte-for-byte</text>
+  <text x="546" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">nothing overwritten</text>
+  <line x1="637" y1="96" x2="667" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#cvf)"/>
+  <rect x="671" y="64" width="181" height="64" rx="8" fill="var(--osm-alt-bg,#ede9fe)" stroke="var(--osm-alt,#6d28d9)" stroke-width="1.5"/>
+  <text x="761" y="88" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">key → all raw spellings</text>
+  <text x="761" y="107" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.85">reverse lookup</text>
+  <text x="761" y="122" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.8">nothing merged away</text>
+  <text x="868" y="158" text-anchor="end" font-size="11" fill="currentColor" opacity="0.85">Keep the reverse lookup as a materialised view. It is the answer to "which spellings ended up in this bucket", which is the first question asked of any normalisation.</text>
+</svg>
+<figcaption>The last assertion is what turns a lossy-looking operation into a reversible one: the fold is a key, and the raw values it groups are all still there to inspect.</figcaption>
+</figure>
 
 - **Count the distinct surfaces.** `df["surface"].nunique()` should drop after normalization; if `Asphalt` and `asphalt` still both appear, the rule for `surface` did not load.
 - **Prove preservation.** Assert that `df.loc[df["ref"].notna(), "ref"].str.isupper().any()` is still `True` — upper-case route refs must survive.
