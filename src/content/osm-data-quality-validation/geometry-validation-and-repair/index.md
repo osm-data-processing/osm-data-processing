@@ -357,6 +357,10 @@ Downstream of a clean geometry set, routing-graph topology and tag-consistency c
 - [Detecting Self-Intersecting OSM Polygons with Shapely](https://www.osm-data-processing.org/osm-data-quality-validation/geometry-validation-and-repair/detecting-self-intersecting-osm-polygons-with-shapely/) — batch-flag bowtie and figure-eight polygons across reconstructed areas, classify each with `explain_validity`, and emit a report before any repair.
 - [Repairing Unclosed Ways and Broken Multipolygons](https://www.osm-data-processing.org/osm-data-quality-validation/geometry-validation-and-repair/repairing-unclosed-ways-and-broken-multipolygons/) — assemble relation members into closed rings, close near-miss ways, and fix outer/inner assignment and winding.
 
+## In this section
+
+- [Snapping Near-Duplicate OSM Nodes with a Tolerance](https://www.osm-data-processing.org/osm-data-quality-validation/geometry-validation-and-repair/snapping-near-duplicate-osm-nodes-with-a-tolerance/) — closing ring gaps without merging features that are genuinely apart.
+
 ## Frequently Asked Questions
 
 <details>

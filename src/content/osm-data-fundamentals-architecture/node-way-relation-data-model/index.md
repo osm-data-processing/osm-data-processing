@@ -407,6 +407,10 @@ Records that fail reference closure or topology validation should be written to 
 }
 </script>
 
+## In this section
+
+- [Resolving Way-Node References Without a Full Node Cache](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/resolving-way-node-references-without-a-full-node-cache/) — building way geometries on a memory budget with a three-pass resolver.
+
 ## Frequently Asked Questions
 
 <details>

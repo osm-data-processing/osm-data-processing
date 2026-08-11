@@ -331,6 +331,10 @@ Tags that fail validation flow to the same quarantine contract triaged in [error
 }
 </script>
 
+## In this section
+
+- [Parsing OSM Opening Hours Values](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/parsing-osm-opening-hours-values/) — a grammar the rule-override semantics make impossible to regex.
+
 ## Frequently Asked Questions
 
 <details>

@@ -288,6 +288,10 @@ This section has one child guide, which turns the "which H3 resolution?" questio
 }
 </script>
 
+## In this section
+
+- [Converting OSM Geometries to Quadkeys](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-index-selection-rtree-h3-quadkey/converting-osm-geometries-to-quadkeys/) — tile-aligned cells where containment is a string prefix test.
+
 ## Frequently Asked Questions
 
 <details>

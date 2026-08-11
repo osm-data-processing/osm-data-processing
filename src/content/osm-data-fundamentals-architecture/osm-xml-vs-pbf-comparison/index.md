@@ -343,6 +343,11 @@ The choice between OSM XML and PBF is an engineering trade-off between transpare
 
 Neither format is a good archival choice on its own, because both record a snapshot without recording where it came from. An archived extract needs its replication sequence number and base URL in the header, and PBF is the only one of the two that carries structured header fields at all — an XML file has nowhere to put them except a comment nothing parses. For anything intended to be re-derivable later, that alone decides it.
 
+## In this section
+
+- [Converting OSM XML to PBF with osmium](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/converting-osm-xml-to-pbf-with-osmium/) — the conversion itself, including the metadata and replication fields it drops by default.
+- [Measuring OSM XML vs PBF Parse Throughput](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/measuring-osm-xml-vs-pbf-parse-throughput/) — putting reproducible numbers on the payback.
+
 ## Related
 
 - [OSM Data Fundamentals & Architecture](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/) — the foundation this format decision belongs to.

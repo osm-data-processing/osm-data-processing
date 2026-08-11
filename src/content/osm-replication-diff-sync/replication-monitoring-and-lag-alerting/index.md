@@ -264,6 +264,8 @@ The pairing worth building deliberately is an alert that links to the dashboard 
 ## In this section
 
 - [Measuring OSM Replication Lag in Seconds](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-monitoring-and-lag-alerting/measuring-osm-replication-lag-in-seconds/) — the lag calculation itself, including the timezone and escaped-colon traps.
+- [Exporting Diff-Sync Metrics to Prometheus](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-monitoring-and-lag-alerting/exporting-diff-sync-metrics-to-prometheus/) — a metrics endpoint that does not fetch upstream on scrape.
+- [Alerting on a Stalled OSM Update Pipeline](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-monitoring-and-lag-alerting/alerting-on-a-stalled-osm-update-pipeline/) — alert rules that distinguish your fault from upstream’s.
 
 ## Frequently Asked Questions
 

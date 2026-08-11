@@ -354,6 +354,10 @@ This reference expands into a focused, runnable treatment of its most common rul
 }
 </script>
 
+## In this section
+
+- [Validating OSM Address Tags Against a Reference](https://www.osm-data-processing.org/osm-data-quality-validation/tag-and-attribute-consistency-checks/validating-osm-address-tags-against-a-reference/) — the address checks that need no reference data, and the one that does.
+
 ## Frequently Asked Questions
 
 <details>

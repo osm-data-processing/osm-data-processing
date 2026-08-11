@@ -342,6 +342,10 @@ This reference expands into a focused walkthrough of its highest-leverage check:
 }
 </script>
 
+## In this section
+
+- [Detecting Turn Restriction Errors in OSM](https://www.osm-data-processing.org/osm-data-quality-validation/routing-graph-topology-qa/detecting-turn-restriction-errors-in-osm/) — the restrictions a router silently ignores, and why they all look the same.
+
 ## Frequently Asked Questions
 
 <details>

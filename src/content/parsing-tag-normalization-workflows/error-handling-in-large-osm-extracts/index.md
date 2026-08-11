@@ -442,6 +442,10 @@ The committed Parquet output is then ready for projection to a working CRS per [
 
 - [Fixing malformed OSM tags during ETL ingestion](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/fixing-malformed-osm-tags-during-etl-ingestion/) — diagnostic profiling and targeted regex repairs for the malformed-tag records this stage quarantines.
 
+## In this section
+
+- [Resuming an Interrupted OSM Import](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/resuming-an-interrupted-osm-import/) — atomic units and commit-then-mark ordering, so a crash costs minutes.
+
 ## Frequently Asked Questions
 
 <details>

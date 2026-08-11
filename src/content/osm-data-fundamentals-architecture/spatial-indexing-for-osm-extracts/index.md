@@ -363,6 +363,11 @@ For ingestion that produces the geometry stream this index consumes, the concurr
   <text x="550" y="408" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.9">The index is built once from the stream; every later query is a cheap MBR prune followed by an exact predicate on the stored geometries.</text>
 </svg>
 
+## In this section
+
+- [Building an R-tree Index over OSM Geometries](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/building-an-rtree-index-over-osm-geometries/) — bulk-loading and serialising the index so reopening costs a fraction of a second.
+- [Accelerating Point-in-Polygon Joins on OSM Data](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/accelerating-point-in-polygon-joins-on-osm-data/) — the refine stage at scale, with the boundary cases spelled out.
+
 ## Frequently Asked Questions
 
 <details>

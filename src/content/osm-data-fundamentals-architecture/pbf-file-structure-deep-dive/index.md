@@ -383,6 +383,10 @@ These focused walkthroughs implement specific tasks against the format described
 - [How to decode OSM PBF headers in Python](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/how-to-decode-osm-pbf-headers-in-python/) — a defensive `HeaderBlock` reader with size-ceiling enforcement and feature validation.
 - [Extracting metadata from OSM planet files](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/extracting-metadata-from-osm-planet-files/) — pulling replication sequence, timestamp, and bbox for version lineage without a full parse.
 
+## In this section
+
+- [Reading DenseNodes and Delta-Encoded Coordinates](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/reading-dense-nodes-and-delta-encoded-coordinates/) — the encoding holding almost every node, and the array that only looks delta-coded.
+
 ## Frequently Asked Questions
 
 <details>

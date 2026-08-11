@@ -291,6 +291,10 @@ Keep the round-trip fixture small and geographically spread: a handful of points
 
 Record the transformation actually used alongside the output, not just the target code. Two pipelines both claiming EPSG:25832 can differ by metres if one had a datum grid available and the other silently fell back, and the only way to tell them apart afterwards is if each wrote down which pipeline PROJ selected. `Transformer.description` gives that string in one line and costs nothing to store.
 
+## In this section
+
+- [Picking a UTM Zone for an OSM Extract](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/picking-a-utm-zone-for-an-osm-extract/) — deriving the projected CRS from the extract, and knowing when UTM is wrong.
+
 ## Go deeper
 
 - [Converting OSM coordinates to local CRS with PyProj](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/converting-osm-coordinates-to-local-crs-with-pyproj/) — a complete, production-tested reprojection implementation with worker caching, grid provisioning, and accuracy verification.

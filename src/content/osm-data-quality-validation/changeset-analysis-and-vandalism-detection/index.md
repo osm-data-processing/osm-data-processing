@@ -298,6 +298,12 @@ One further note on fairness. Every signal here is a proxy, and proxies encode a
 
 None of that makes the signals useless; it makes them signals rather than judgements, and it is another reason the output is a queue. A reviewer looking at a flagged changeset can see immediately that a new account made a large local edit with an unfamiliar editor and recognise a mapping party rather than an attack. A threshold cannot.
 
+## In this section
+
+- [Scoring OSM Changesets for Suspicious Edits](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/scoring-osm-changesets-for-suspicious-edits/) — the complete scorer, weights and reason lists included.
+- [Detecting Bulk Deletions in an OSM Diff Stream](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/detecting-bulk-deletions-in-an-osm-diff-stream/) — the single highest-value check, on its own.
+- [Fetching OSM Changeset Metadata from the API](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/fetching-osm-changeset-metadata-from-the-api/) — the comment, editor and account fields the diff does not carry, with caching.
+
 ## Frequently Asked Questions
 
 <details>

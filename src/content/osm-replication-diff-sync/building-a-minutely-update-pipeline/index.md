@@ -432,6 +432,10 @@ This guide has one companion that takes the loop from a script you run by hand t
 
 - [Scheduling OSM Diff Sync with systemd Timers](https://www.osm-data-processing.org/osm-replication-diff-sync/building-a-minutely-update-pipeline/scheduling-osm-diff-sync-with-systemd-timers/) — a `.service` and `.timer` unit pair that runs the loop on a cadence with journald logging, `Restart=` semantics, and a lock that prevents overlapping runs.
 
+## In this section
+
+- [Running OSM Diff Sync in Docker with a Persistent State Volume](https://www.osm-data-processing.org/osm-replication-diff-sync/building-a-minutely-update-pipeline/running-osm-diff-sync-in-docker-with-a-persistent-state-volume/) — state on a volume, the lock beside it, and a healthcheck that tests progress.
+
 ## Frequently Asked Questions
 
 <details>
