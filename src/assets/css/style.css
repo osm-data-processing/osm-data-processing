@@ -255,18 +255,29 @@ a:focus-visible {
   font-size: 1.02rem;
 }
 
+.site-nav { min-width: 0; }
 .site-nav__list {
   list-style: none;
   display: flex;
   flex-wrap: nowrap;
   gap: 0.25rem;
   margin: 0; padding: 0;
+  /* Safety net for the narrowest phones, where even eight icons outgrow the
+     row. Scroll it rather than letting a tab — possibly the SELECTED one —
+     sit off the edge of the viewport where it cannot be seen or tapped. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
 }
+.site-nav__list::-webkit-scrollbar { display: none; }
+.site-nav__list > li { scroll-snap-align: end; flex: 0 0 auto; }
+
 .site-nav__link {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.45rem 0.75rem;
+  padding: 0.5rem;
   border-radius: var(--r-pill);
   text-decoration: none;
   color: var(--c-ink-soft);
@@ -283,14 +294,42 @@ a:focus-visible {
 .site-nav__link.is-active {
   color: var(--c-accent);
   background: var(--c-accent-wash-strong);
+  font-weight: 650;
+  padding: 0.45rem 0.7rem;
 }
-.site-nav__icon { width: 18px; height: 18px; flex-shrink: 0; }
 
-@media (max-width: 640px) {
-  .site-header__name { display: none; }
-  .site-nav__link span:not(.visually-hidden) { display: none; }
-  .site-nav__link { padding: 0.5rem; }
+/* Seven section tabs plus Home need ~925px of labels, which never fits beside
+   the brand and the theme toggle inside the content column — so the bar is
+   icon-first at every width, and only the CURRENT tab spells itself out. That
+   is what the bar is for: saying where you are. */
+.site-nav__link span:not(.visually-hidden) {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0);
+  white-space: nowrap; border: 0;
 }
+.site-nav__link.is-active span:not(.visually-hidden) {
+  position: static;
+  width: auto; height: auto;
+  margin: 0; overflow: visible; clip: auto;
+}
+
+@media (max-width: 760px) {
+  .site-header__name { display: none; }
+}
+
+/* Too narrow for the active label beside seven icons. */
+@media (max-width: 460px) {
+  .site-nav__link.is-active span:not(.visually-hidden) {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+  }
+  .site-nav__link.is-active { padding: 0.5rem; }
+}
+
+.site-nav__icon { width: 18px; height: 18px; flex-shrink: 0; }
 
 /* -------------------------------------------------------------
    Logo

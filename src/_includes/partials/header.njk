@@ -17,7 +17,7 @@
         </li>
         {%- for s in site.sections %}
         <li>
-          <a class="site-nav__link{% if page.url | startsWith(s.url) %} is-active{% endif %}" href="{{ site.url }}{{ s.url }}" {% if page.url | startsWith(s.url) %}aria-current="page"{% endif %}>
+          <a class="site-nav__link{% if page.url | startsWith(s.url) %} is-active{% endif %}" href="{{ site.url }}{{ s.url }}"{% if page.url == s.url %} aria-current="page"{% elif page.url | startsWith(s.url) %} aria-current="true"{% endif %}>
             {{ icon(s.icon, 'icon site-nav__icon') }}
             <span>{{ s.navLabel or s.title }}</span>
           </a>
