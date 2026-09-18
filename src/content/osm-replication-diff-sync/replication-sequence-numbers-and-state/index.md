@@ -418,6 +418,7 @@ No. Each cadence maintains an independent counter, so the same integer names dif
 - [Extracting Metadata from OSM Planet Files](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/extracting-metadata-from-osm-planet-files/) — where the header replication keys sit among other planet metadata.
 - [Finding the Replication Sequence for a Timestamp](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/finding-the-replication-sequence-for-a-timestamp/) — resolving a start sequence when only a datetime is known.
 - [Recovering from a Replication Sequence Gap](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/recovering-from-a-replication-sequence-gap/) — detecting and repairing a missed or out-of-order diff.
+- [Pinning a Reproducible OSM Snapshot by Sequence Number](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/pinning-a-reproducible-osm-snapshot-by-sequence-number/) — naming an exact OSM state so a rerun months later reads the same data.
 
 This guide is part of the [OSM Replication & Diff Sync](https://www.osm-data-processing.org/osm-replication-diff-sync/) section — return there for the full incremental-update pipeline from base extract to continuously synced database.
 

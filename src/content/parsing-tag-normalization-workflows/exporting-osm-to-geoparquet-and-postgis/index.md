@@ -273,6 +273,7 @@ Where parallel feeding is genuinely necessary — usually because the export mus
 - [Writing OSM Features to GeoParquet with PyArrow](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/writing-osm-features-to-geoparquet-with-pyarrow/) — the complete writer, metadata block and row-group sizing included.
 - [Loading OSM Data into PostGIS with osm2pgsql Flex](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/loading-osm-data-into-postgis-with-osm2pgsql-flex/) — a Lua style file that produces an updatable schema.
 - [Partitioning a GeoParquet OSM Lake by H3 Cell](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/partitioning-a-geoparquet-osm-lake-by-h3-cell/) — a partition key that prunes without shattering the dataset into tiny files.
+- [Migrating a PostGIS OSM Schema Without Downtime](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/migrating-a-postgis-osm-schema-without-downtime/) — a shadow schema and an atomic switch instead of an ALTER that holds a lock for hours.
 
 ## Frequently Asked Questions
 

@@ -303,6 +303,8 @@ The guides below build out each stage of the workflow:
 - [Value Standardization & Regex Cleaning](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/value-standardization-regex-cleaning/) — anchored pattern matching and unit conversion for consistent values.
 - [Error Handling in Large OSM Extracts](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/) — isolating malformed geometry and tags without halting the run.
 - [OSMnx Graph Conversion Techniques](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/osmnx-graph-conversion-techniques/) — converting cleaned attributes into routable network graphs.
+- [Exporting OSM to GeoParquet and PostGIS](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/) — landing normalised features where consumers read them, and keeping the two sinks agreeing.
+- [Modelling OSM for Analytics Warehouses](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/modelling-osm-for-analytics-warehouses/) — the table shapes that make OSM answerable by people who will never read a tag.
 
 ## Frequently Asked Questions
 

@@ -294,6 +294,8 @@ Record the transformation actually used alongside the output, not just the targe
 ## In this section
 
 - [Picking a UTM Zone for an OSM Extract](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/picking-a-utm-zone-for-an-osm-extract/) — deriving the projected CRS from the extract, and knowing when UTM is wrong.
+- [Handling Antimeridian-Crossing OSM Geometry](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/handling-antimeridian-crossing-osm-geometry/) — what breaks when a polygon spans ±180°, and the representations that survive it.
+- [Measuring Area Accurately on OSM Polygons](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/measuring-area-accurately-on-osm-polygons/) — why a Web Mercator area is wrong by a factor that depends on latitude, and what to use instead.
 
 ## Go deeper
 

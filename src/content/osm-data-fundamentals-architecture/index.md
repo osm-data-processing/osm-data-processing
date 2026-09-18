@@ -287,6 +287,10 @@ Each reference below drills into one layer of the data model and format introduc
 - [Coordinate Reference Systems in OSM](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/coordinate-reference-systems-in-osm/) — WGS 84 storage, reprojection, datum consistency, and precision retention.
 - [Spatial Indexing for OSM Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/) — R-tree, Quadkey, and H3 strategies for fast spatial queries at scale.
 - [Tag Taxonomy & Key-Value Standards](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/) — enforcing semantic consistency across the open tagging schema.
+- [OSM Extract Clipping & Boundaries](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/) — cutting a region out of a planet file without shredding the reference graph that holds its geometry together.
+- [Spatial Index Selection: R-tree, H3, Quadkey](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-index-selection-rtree-h3-quadkey/) — matching an index structure to the query shape it will actually serve.
+- [OSM Feature Identity & ID Stability](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-feature-identity-and-id-stability/) — why an OSM identifier is not a stable key for a real-world thing, and what to do about it.
+- [OSM Licensing & ODbL Compliance](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-licensing-and-odbl-compliance/) — attribution, share-alike and the provenance record that makes either one provable.
 
 ## Frequently Asked Questions
 

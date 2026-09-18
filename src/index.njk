@@ -30,20 +30,32 @@ description: "Engineer production OSM data pipelines: PBF/XML parsing, tag norma
         Ray, or plain old multiprocessing.
       </p>
       <p>
-        The content spans four tracks: a <a href="{{ site.url }}{{ site.sections[0].url }}">data fundamentals track</a>
-        covering the OSM schema, serialization formats and
+        The content spans seven tracks. A <a href="{{ site.url }}{{ site.sections[0].url }}">data fundamentals track</a>
+        covers the OSM schema, serialization formats and
         <a href="{{ site.url }}/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/">extract clipping</a>;
-        a <a href="{{ site.url }}{{ site.sections[1].url }}">parsing and normalization track</a> covering ingestion,
+        a <a href="{{ site.url }}{{ site.sections[1].url }}">parsing and normalization track</a> covers ingestion,
         routing-graph conversion and
         <a href="{{ site.url }}/parsing-tag-normalization-workflows/exporting-osm-to-geoparquet-and-postgis/">export to GeoParquet and PostGIS</a>;
-        a <a href="{{ site.url }}{{ site.sections[2].url }}">replication and diff-sync track</a> for keeping local data current
+        a <a href="{{ site.url }}{{ site.sections[2].url }}">replication and diff-sync track</a> keeps local data current
         with upstream change files and
-        <a href="{{ site.url }}/osm-replication-diff-sync/replication-monitoring-and-lag-alerting/">monitoring how far behind you are</a>;
-        and a <a href="{{ site.url }}{{ site.sections[3].url }}">data quality and validation track</a> covering rule-driven QA and
+        <a href="{{ site.url }}/osm-replication-diff-sync/incremental-updates-for-derived-datasets/">pushes those changes into derived datasets</a>;
+        and a <a href="{{ site.url }}{{ site.sections[3].url }}">data quality and validation track</a> covers rule-driven QA,
+        <a href="{{ site.url }}/osm-data-quality-validation/continuous-qa-for-osm-pipelines/">gates that run on every build</a> and
         <a href="{{ site.url }}/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/">changeset analysis</a>.
       </p>
+      <p>
+        Three further tracks cover what happens either side of the pipeline: a
+        <a href="{{ site.url }}{{ site.sections[4].url }}">querying track</a> for Overpass QL, Nominatim and
+        <a href="{{ site.url }}/querying-osm-overpass-and-apis/overpass-api-rate-limits-and-etiquette/">working within a shared server's limits</a>;
+        a <a href="{{ site.url }}{{ site.sections[5].url }}">vector tiles and rendering track</a> covering the MVT geometry model,
+        Tippecanoe, Planetiler and
+        <a href="{{ site.url }}/osm-vector-tiles-and-rendering/serving-vector-tiles-with-pmtiles/">serving tiles from a single archive</a>;
+        and a <a href="{{ site.url }}{{ site.sections[6].url }}">conflation and enrichment track</a> for matching OSM against
+        authoritative datasets and
+        <a href="{{ site.url }}/osm-conflation-and-enrichment/">auditing a match run before it ships</a>.
+      </p>
       <p class="hero__stat">
-        {{ collections.contentPages.length }} in-depth pages across four sections — every one carrying worked code,
+        {{ collections.contentPages.length }} in-depth pages across seven sections — every one carrying worked code,
         hand-drawn diagrams and a light and dark reading mode.
       </p>
     </div>
@@ -114,6 +126,18 @@ description: "Engineer production OSM data pipelines: PBF/XML parsing, tag norma
       <div>
         <h3>Operations &amp; edit safety</h3>
         <p>Replication lag signals and alert thresholds that survive a normal day, plus changeset scoring that ranks suspicious edits for a human rather than reverting them.</p>
+      </div>
+      <div>
+        <h3>Querying &amp; live APIs</h3>
+        <p>Overpass QL that returns what you meant, Nominatim structured search and reverse geocoding, and the judgement call between a live query and a local extract.</p>
+      </div>
+      <div>
+        <h3>Vector tiles &amp; rendering</h3>
+        <p>The MVT geometry model and its integer grid, zoom-aware generalization, Tippecanoe and Planetiler pipelines, and serving a whole pyramid from one PMTiles archive.</p>
+      </div>
+      <div>
+        <h3>Conflation &amp; enrichment</h3>
+        <p>Spatial and attribute matching against authoritative sources, deciding what counts as a match, and auditing a conflation run before any of it reaches production.</p>
       </div>
     </div>
   </div>

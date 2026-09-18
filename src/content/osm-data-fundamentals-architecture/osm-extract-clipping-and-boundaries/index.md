@@ -252,6 +252,7 @@ def verify_extract(path: str, min_nodes: int = 1) -> dict[str, int]:
 - [Clipping an OSM Extract with a .poly Boundary](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/clipping-an-osm-extract-with-a-poly-boundary/) — the end-to-end procedure for a single region, including writing the boundary file.
 - [Choosing complete_ways vs smart in osmium extract](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/choosing-complete-ways-vs-smart-in-osmium-extract/) — how to decide between the two strategies that both produce valid output.
 - [Splitting a Planet File into Regional Extracts](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/splitting-a-planet-file-into-regional-extracts/) — one pass, many outputs, and how to keep the run within a disk budget.
+- [Building a .poly File from an OSM Admin Relation](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-extract-clipping-and-boundaries/building-a-poly-file-from-an-osm-admin-relation/) — turning a boundary relation into the polygon format the extract tools accept.
 
 ## Frequently Asked Questions
 

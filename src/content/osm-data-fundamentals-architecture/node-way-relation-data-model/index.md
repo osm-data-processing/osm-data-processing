@@ -410,6 +410,8 @@ Records that fail reference closure or topology validation should be written to 
 ## In this section
 
 - [Resolving Way-Node References Without a Full Node Cache](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/resolving-way-node-references-without-a-full-node-cache/) — building way geometries on a memory budget with a three-pass resolver.
+- [Handling Multipolygon Members With No Role](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/handling-multipolygon-members-with-no-role/) — assembling a multipolygon when the outer and inner roles are missing or wrong.
+- [Traversing Nested OSM Relations Safely](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/traversing-nested-osm-relations-safely/) — bounded recursion, cycle detection and the depth limits real data demands.
 
 ## Frequently Asked Questions
 

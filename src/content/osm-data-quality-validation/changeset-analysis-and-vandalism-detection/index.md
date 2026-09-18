@@ -303,6 +303,7 @@ None of that makes the signals useless; it makes them signals rather than judgem
 - [Scoring OSM Changesets for Suspicious Edits](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/scoring-osm-changesets-for-suspicious-edits/) — the complete scorer, weights and reason lists included.
 - [Detecting Bulk Deletions in an OSM Diff Stream](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/detecting-bulk-deletions-in-an-osm-diff-stream/) — the single highest-value check, on its own.
 - [Fetching OSM Changeset Metadata from the API](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/fetching-osm-changeset-metadata-from-the-api/) — the comment, editor and account fields the diff does not carry, with caching.
+- [Monitoring an Area for Suspicious OSM Edits](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/monitoring-an-area-for-suspicious-osm-edits/) — scoring the changeset stream for one region into a queue short enough to be worked.
 
 ## Frequently Asked Questions
 

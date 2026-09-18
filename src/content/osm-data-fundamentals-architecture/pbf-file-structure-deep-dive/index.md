@@ -386,6 +386,8 @@ These focused walkthroughs implement specific tasks against the format described
 ## In this section
 
 - [Reading DenseNodes and Delta-Encoded Coordinates](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/reading-dense-nodes-and-delta-encoded-coordinates/) — the encoding holding almost every node, and the array that only looks delta-coded.
+- [Decoding the PBF String Table and Tag Indices](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/decoding-the-pbf-string-table-and-tag-indices/) — how tags become integer pairs, and how to turn them back into strings correctly.
+- [Writing a Valid OSM PBF File from Python](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/writing-a-valid-osm-pbf-file-from-python/) — emitting blobs, headers and delta-encoded groups that other tools will accept.
 
 ## Frequently Asked Questions
 

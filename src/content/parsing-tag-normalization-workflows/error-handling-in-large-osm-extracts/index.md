@@ -536,5 +536,6 @@ For dense urban extracts, 250,000–750,000 features per chunk is a practical ba
 - [Memory-Efficient Chunk Processing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/) — streaming generators when memory, not corruption, is the binding constraint.
 - [OSMnx Graph Conversion Techniques](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/osmnx-graph-conversion-techniques/) — topology validation that catches defects slipping past tag-level checks.
 - [Fixing malformed OSM tags during ETL ingestion](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/fixing-malformed-osm-tags-during-etl-ingestion/) — targeted repairs for the malformed-tag records quarantined here.
+- [Quarantining Bad OSM Features to a Dead-Letter Store](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/error-handling-in-large-osm-extracts/quarantining-bad-osm-features-to-a-dead-letter-store/) — preserving the input, the reason and the code version so a fix can be replayed.
 
 This guide is part of [Parsing & Tag Normalization Workflows](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/); return to that overview to follow the data through normalization, error triage, and routing-graph conversion.

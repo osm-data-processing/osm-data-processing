@@ -345,6 +345,7 @@ This reference expands into a focused walkthrough of its highest-leverage check:
 ## In this section
 
 - [Detecting Turn Restriction Errors in OSM](https://www.osm-data-processing.org/osm-data-quality-validation/routing-graph-topology-qa/detecting-turn-restriction-errors-in-osm/) — the restrictions a router silently ignores, and why they all look the same.
+- [Validating Oneway and Access Tags for Routing](https://www.osm-data-processing.org/osm-data-quality-validation/routing-graph-topology-qa/validating-oneway-and-access-tags-for-routing/) — finding the reversed oneway that makes a block unreachable, per routing profile.
 
 ## Frequently Asked Questions
 

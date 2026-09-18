@@ -2,7 +2,7 @@
   "title": "OSM Data Processing & QA Pipelines",
   "shortName": "OSM Pipelines",
   "url": "https://www.osm-data-processing.org",
-  "description": "A technical resource for building, maintaining, and scaling automated OpenStreetMap data pipelines \u2014 PBF/XML parsing, tag normalization, topology cleaning, routing graph extraction, update diff sync, validation rules, and Python automation.",
+  "description": "A technical resource for building, maintaining, and scaling automated OpenStreetMap data pipelines — PBF/XML parsing, tag normalization, topology cleaning, routing graph extraction, update diff sync, validation rules, and Python automation.",
   "author": "OSM Data Processing",
   "lang": "en",
   "themeColor": "#2c6b56",
@@ -35,6 +35,27 @@
       "icon": "shield-check",
       "blurb": "Author JOSM, Osmose, and Python validation rules; repair geometry; check routing-graph topology and tag consistency across the pipeline.",
       "navLabel": "Quality"
+    },
+    {
+      "title": "Querying OSM: Overpass, Nominatim & APIs",
+      "url": "/querying-osm-overpass-and-apis/",
+      "icon": "search",
+      "blurb": "Overpass QL, Nominatim geocoding, the editing API, extract providers, and deciding when a live query beats a local extract.",
+      "navLabel": "Querying"
+    },
+    {
+      "title": "OSM Vector Tiles & Rendering Pipelines",
+      "url": "/osm-vector-tiles-and-rendering/",
+      "icon": "layers",
+      "blurb": "Turn normalized OSM features into vector tiles: the MVT geometry model, Tippecanoe, Planetiler, PMTiles serving, and zoom-aware generalization.",
+      "navLabel": "Tiles"
+    },
+    {
+      "title": "OSM Conflation & Data Enrichment",
+      "url": "/osm-conflation-and-enrichment/",
+      "icon": "merge",
+      "blurb": "Match OSM features against authoritative datasets, prepare imports, enrich attributes from external sources, and audit a conflation run before it ships.",
+      "navLabel": "Conflation"
     }
   ],
   "ctas": [
@@ -61,6 +82,24 @@
       "url": "/osm-data-quality-validation/",
       "icon": "shield-check",
       "color": "rose"
+    },
+    {
+      "label": "Querying & APIs",
+      "url": "/querying-osm-overpass-and-apis/",
+      "icon": "search",
+      "color": "teal"
+    },
+    {
+      "label": "Vector tiles",
+      "url": "/osm-vector-tiles-and-rendering/",
+      "icon": "layers",
+      "color": "indigo"
+    },
+    {
+      "label": "Conflation & enrichment",
+      "url": "/osm-conflation-and-enrichment/",
+      "icon": "merge",
+      "color": "amber"
     }
   ]
 }

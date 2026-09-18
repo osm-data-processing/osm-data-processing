@@ -334,6 +334,8 @@ Tags that fail validation flow to the same quarantine contract triaged in [error
 ## In this section
 
 - [Parsing OSM Opening Hours Values](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/parsing-osm-opening-hours-values/) — a grammar the rule-override semantics make impossible to regex.
+- [Normalizing OSM Yes/No Tag Values](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/normalizing-osm-yes-no-tag-values/) — the variants real data contains, and why guessing at an unknown one is worse than reporting it.
+- [Splitting Semicolon-Separated OSM Tag Values](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/tag-taxonomy-key-value-standards/splitting-semicolon-separated-osm-tag-values/) — separating a genuine multi-value from a semicolon that belongs to the value.
 
 ## Frequently Asked Questions
 

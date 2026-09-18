@@ -217,6 +217,8 @@ Each reference below drills into one stage of the update loop introduced above:
 - [Replication Sequence Numbers and State](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-sequence-numbers-and-state/) — how sequence numbers, `state.txt`, and header anchors track exactly how current your data is and how to detect gaps.
 - [Full-History .osh.pbf Processing](https://www.osm-data-processing.org/osm-replication-diff-sync/full-history-osh-pbf-processing/) — retaining every element version and reconstructing the map at any past instant with `time-filter`.
 - [Building a Minutely Update Pipeline](https://www.osm-data-processing.org/osm-replication-diff-sync/building-a-minutely-update-pipeline/) — assembling a resumable, atomic, scheduled fetch-apply-record loop for steady-state tracking.
+- [Replication Monitoring & Lag Alerting](https://www.osm-data-processing.org/osm-replication-diff-sync/replication-monitoring-and-lag-alerting/) — the signals that separate a running process from current data, and thresholds that survive an ordinary day.
+- [Incremental Updates for Derived Datasets](https://www.osm-data-processing.org/osm-replication-diff-sync/incremental-updates-for-derived-datasets/) — pushing changes through to tiles, indexes and aggregates without rebuilding any of them.
 
 ## Frequently Asked Questions
 

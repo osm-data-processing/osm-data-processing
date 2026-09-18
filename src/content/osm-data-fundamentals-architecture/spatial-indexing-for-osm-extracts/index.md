@@ -367,6 +367,8 @@ For ingestion that produces the geometry stream this index consumes, the concurr
 
 - [Building an R-tree Index over OSM Geometries](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/building-an-rtree-index-over-osm-geometries/) — bulk-loading and serialising the index so reopening costs a fraction of a second.
 - [Accelerating Point-in-Polygon Joins on OSM Data](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/accelerating-point-in-polygon-joins-on-osm-data/) — the refine stage at scale, with the boundary cases spelled out.
+- [Bulk Loading an R-tree Versus Inserting One by One](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/bulk-loading-an-rtree-versus-inserting-one-by-one/) — why the packing algorithm matters more than the insert loop you were optimising.
+- [Choosing a Grid Cell Size for OSM Spatial Hashing](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/spatial-indexing-for-osm-extracts/choosing-a-grid-cell-size-for-osm-spatial-hashing/) — sizing cells against feature density instead of picking a round number.
 
 ## Frequently Asked Questions
 

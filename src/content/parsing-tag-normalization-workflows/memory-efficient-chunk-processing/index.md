@@ -411,6 +411,8 @@ The focused guides below drill into the two levers that keep a stream inside its
 
 - [A Bounded LRU Node Cache for OSM Streaming](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/bounded-lru-node-cache-for-osm-streaming/) — capping the node-location store so way reconstruction stays within a fixed memory ceiling.
 - [Sizing PBF Chunk Batches to a Memory Budget](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/sizing-pbf-chunk-batches-to-a-memory-budget/) — deriving a safe batch size from element width and the RAM you can spend.
+- [Profiling Peak Memory of an OSM Parser](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/profiling-peak-memory-of-an-osm-parser/) — measuring where the peak actually is rather than where it feels like it should be.
+- [Using an LMDB Node Store for OSM Parsing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/memory-efficient-chunk-processing/using-an-lmdb-node-store-for-osm-parsing/) — moving the node cache out of the heap and onto a memory-mapped file.
 
 ## Related
 

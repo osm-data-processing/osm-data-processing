@@ -393,6 +393,8 @@ If you only need to carve out a bounding box or a tag subset and write it back t
 - [PBF File Structure Deep Dive](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/pbf-file-structure-deep-dive/) — the block-framed encoding that makes streaming and whole-file transforms possible.
 - [Node-Way-Relation Data Model](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/node-way-relation-data-model/) — the reference-resolution rules every reader handles differently.
 - [Benchmarking OSM Parser Memory and Throughput](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/choosing-an-osm-parser-pyosmium-pyrosm-osmium/benchmarking-osm-parser-memory-and-throughput/) — turn the guidance here into numbers for your own extract.
+- [Chaining osmium-tool Commands in a Shell Pipeline](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/choosing-an-osm-parser-pyosmium-pyrosm-osmium/chaining-osmium-tool-commands-in-a-shell-pipeline/) — composing filters without writing an intermediate file at every step.
+- [Reading OSM PBF with DuckDB Spatial](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/choosing-an-osm-parser-pyosmium-pyrosm-osmium/reading-osm-pbf-with-duckdb-spatial/) — querying an extract in SQL without loading it into anything first.
 
 This guide is part of [Parsing & Tag Normalization Workflows](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/) — return there to follow the data from ingestion through normalization, error triage, and routing-graph conversion.
 

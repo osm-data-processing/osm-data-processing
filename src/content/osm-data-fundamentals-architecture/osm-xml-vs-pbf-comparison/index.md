@@ -347,6 +347,7 @@ Neither format is a good archival choice on its own, because both record a snaps
 
 - [Converting OSM XML to PBF with osmium](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/converting-osm-xml-to-pbf-with-osmium/) — the conversion itself, including the metadata and replication fields it drops by default.
 - [Measuring OSM XML vs PBF Parse Throughput](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/measuring-osm-xml-vs-pbf-parse-throughput/) — putting reproducible numbers on the payback.
+- [Streaming OSM XML with Expat in Constant Memory](https://www.osm-data-processing.org/osm-data-fundamentals-architecture/osm-xml-vs-pbf-comparison/streaming-osm-xml-with-expat-in-constant-memory/) — an event parser that never holds the document, and the state it does have to keep.
 
 ## Related
 

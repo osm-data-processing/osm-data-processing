@@ -279,6 +279,8 @@ Each guide below drills into one part of the checking layer introduced above:
 - [Geometry Validation & Repair](https://www.osm-data-processing.org/osm-data-quality-validation/geometry-validation-and-repair/) — detecting invalid polygons, self-intersections, and unclosed ways, and repairing them without silently corrupting area.
 - [Routing-Graph Topology QA](https://www.osm-data-processing.org/osm-data-quality-validation/routing-graph-topology-qa/) — connectivity, reachability, and near-miss junction checks that only surface once ways become a routable graph.
 - [Tag & Attribute Consistency Checks](https://www.osm-data-processing.org/osm-data-quality-validation/tag-and-attribute-consistency-checks/) — value-domain, unit, co-occurrence, and deprecation rules that enforce the conventions OSM's open schema leaves unpoliced.
+- [Changeset Analysis & Vandalism Detection](https://www.osm-data-processing.org/osm-data-quality-validation/changeset-analysis-and-vandalism-detection/) — scoring edits by consequence so a human reviews the handful that matter rather than the thousands that do not.
+- [Continuous QA for OSM Pipelines](https://www.osm-data-processing.org/osm-data-quality-validation/continuous-qa-for-osm-pipelines/) — running the checks on every execution, with thresholds derived from data and a report somebody acts on.
 
 ## Frequently Asked Questions
 

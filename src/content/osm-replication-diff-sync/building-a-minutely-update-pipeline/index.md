@@ -435,6 +435,7 @@ This guide has one companion that takes the loop from a script you run by hand t
 ## In this section
 
 - [Running OSM Diff Sync in Docker with a Persistent State Volume](https://www.osm-data-processing.org/osm-replication-diff-sync/building-a-minutely-update-pipeline/running-osm-diff-sync-in-docker-with-a-persistent-state-volume/) — state on a volume, the lock beside it, and a healthcheck that tests progress.
+- [Running OSM Diff Sync on Kubernetes with a StatefulSet](https://www.osm-data-processing.org/osm-replication-diff-sync/building-a-minutely-update-pipeline/running-osm-diff-sync-on-kubernetes-with-a-statefulset/) — the controller, volume and probes that give a single-writer loop at-most-one semantics.
 
 ## Frequently Asked Questions
 

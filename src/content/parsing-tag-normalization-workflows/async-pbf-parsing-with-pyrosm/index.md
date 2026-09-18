@@ -417,6 +417,7 @@ The focused guides below extend this concurrent-parsing pattern:
 - [Streaming PBF Blocks Through an Asyncio Queue](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/streaming-pbf-blocks-through-an-asyncio-queue/) — a bounded producer-consumer queue that decouples block decoding from downstream processing.
 - [Tuning Pyrosm Worker Count for PBF Parsing](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/tuning-pyrosm-worker-count-for-pbf-parsing/) — sizing the process pool to cores, memory, and I/O so throughput scales without thrashing.
 - [Speed Up OSM Parsing with Multiprocessing in Python](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/speed-up-osm-parsing-with-multiprocessing-in-python/) — fanning independent fileblocks across a process pool with a final reduce.
+- [Applying Backpressure in an Asyncio OSM Pipeline](https://www.osm-data-processing.org/parsing-tag-normalization-workflows/async-pbf-parsing-with-pyrosm/applying-backpressure-in-an-asyncio-osm-pipeline/) — bounding every queue so a fast reader waits for a slow writer instead of filling memory.
 
 ## Related
 
